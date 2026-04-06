@@ -1,4 +1,4 @@
-# CC CHIPS — Cyber theme
+# CC CHIPS-JY — Cyber theme
 # Teal, yellow, and crimson
 
 # Left chip:   bg #FFF700 (yellow), text #000000
@@ -15,3 +15,8 @@ FG_MID_TEXT="\033[38;2;100;204;194m"
 FG_RIGHT="\033[38;2;70;21;31m"
 BG_RIGHT="\033[48;2;70;21;31m"
 FG_RIGHT_TEXT="\033[38;2;247;80;74m"
+
+# Stats chip:  bg #132831 (teal, matches mid), text #64CCC2
+FG_STATS="\033[38;2;19;40;49m"
+BG_STATS="\033[48;2;19;40;49m"
+FG_STATS_TEXT="\033[38;2;100;204;194m"

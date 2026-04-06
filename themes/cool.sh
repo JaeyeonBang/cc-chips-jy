@@ -1,4 +1,4 @@
-# CC CHIPS — Cool theme
+# CC CHIPS-JY — Cool theme
 # Blue and orange
 
 # Left chip:   bg #008BB7 (blue), text white
@@ -15,3 +15,8 @@ FG_MID_TEXT="\033[38;2;0;219;0m"
 FG_RIGHT="\033[38;2;255;77;0m"
 BG_RIGHT="\033[48;2;255;77;0m"
 FG_RIGHT_TEXT="\033[97m"
+
+# Stats chip:  bg #008BB7 (blue, matches left), text white
+FG_STATS="\033[38;2;0;139;183m"
+BG_STATS="\033[48;2;0;139;183m"
+FG_STATS_TEXT="\033[97m"

@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(gstack)",
+      "Bash(export PATH=\"$HOME/.bun/bin:$PATH\")",
+      "Read(//c/Users/frameout/.claude/skills/gstack/**)",
+      "Read(//c/Users/frameout/.claude/skills/**)",
+      "Bash(./setup)",
+      "Read(//c/Users/frameout/.bun/bin/**)",
+      "Bash(bun --version)",
+      "Bash(chmod +x ~/.bun/bin/bunx)",
+      "Bash(bash engine.sh)",
+      "Bash(CC_CHIPS_THEME=minimal bash engine.sh)",
+      "Bash(python3 -m json.tool)",
+      "Read(//c/Users/frameout/.claude/**)",
+      "Bash(mv ~/.claude/settings.json.tmp ~/.claude/settings.json)",
+      "Bash(rm -rf ~/.claude/cc-chips)",
+      "Bash(bash install.sh)"
+    ]
+  }
+}

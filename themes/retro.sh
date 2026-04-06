@@ -1,4 +1,4 @@
-# CC CHIPS — Retro theme
+# CC CHIPS-JY — Retro theme
 # Pink and lime
 
 # Left chip:   bg #C41665 (pink), text #DDDDDD
@@ -15,3 +15,8 @@ FG_MID_TEXT="\033[38;2;0;0;0m"
 FG_RIGHT="\033[38;2;156;192;42m"
 BG_RIGHT="\033[48;2;156;192;42m"
 FG_RIGHT_TEXT="\033[38;2;0;0;0m"
+
+# Stats chip:  bg #C41665 (pink, matches left), text #DDDDDD
+FG_STATS="\033[38;2;196;22;101m"
+BG_STATS="\033[48;2;196;22;101m"
+FG_STATS_TEXT="\033[38;2;221;221;221m"
