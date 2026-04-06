@@ -10,6 +10,8 @@ Claude Code 상태줄을 위한 커스텀 Powerline 칩 테마.
 | [roger-me/CC-CHIPS](https://github.com/roger-me/CC-CHIPS) | 베이스 엔진, Powerline 칩 렌더링, 테마 시스템, Current/Weekly usage |
 | [sangrokjung/claude-forge](https://github.com/sangrokjung/claude-forge) (cc-chips-custom) | 모델별 비용 계산, 세션 ID, 캐시 히트율, API 응답시간 칩 |
 
+
+
 ## 디렉토리 구조
 
 ```
@@ -142,3 +144,38 @@ export CC_CHIPS_THEME=cyber   # claude (기본) | cool | retro | cyber | minimal
 - `USERNAME`을 실제 Windows 사용자명으로 교체
 - `pwsh` (PowerShell 7+) 또는 `powershell` (Windows PowerShell 5.1)을 사용
 - `engine.ps1`은 ANSI 없이 ASCII 텍스트만 출력 (모든 PowerShell 환경 호환)
+
+
+## License
+
+MIT License © 2026 JaeyeonBang
+
+이 프로젝트는 다음 MIT 오픈소스 프로젝트를 기반으로 합니다:
+
+```
+CC-CHIPS — Copyright (c) roger-me
+https://github.com/roger-me/CC-CHIPS
+Licensed under the MIT License.
+
+claude-forge (cc-chips-custom) — Copyright (c) sangrokjung
+https://github.com/sangrokjung/claude-forge
+Licensed under the MIT License.
+```
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
