@@ -179,7 +179,7 @@ _cache_past_reset() {
     [ ! -f "$USAGE_CACHE" ] && return 1
     local now resets
     now=$(date +%s)
-    resets=$(jq -r '[.five_hour.resets_at // "", .seven_day.resets_at // ""] | .[]' "$USAGE_CACHE" 2>/dev/null)
+    resets=$(jq -r '[.five_hour.resets_at // "", .seven_day.resets_at // "", .seven_day_sonnet.resets_at // ""] | .[]' "$USAGE_CACHE" 2>/dev/null)
     [ -z "$resets" ] && return 1
     local ts epoch
     while IFS= read -r ts; do
@@ -251,8 +251,8 @@ format_reset_time() {
     local epoch
     epoch=$(iso_to_epoch "$iso_str")
     [ -z "$epoch" ] && return
-    LC_TIME=en_US.UTF-8 date -j -r "$epoch" +"%-H:%M, %A, %d/%m/%Y" 2>/dev/null || \
-    LC_TIME=en_US.UTF-8 date -d "@$epoch" +"%-H:%M, %A, %d/%m/%Y" 2>/dev/null
+    LC_TIME=en_US.UTF-8 date -j -r "$epoch" +"%-H:%M, %A, %Y-%m-%d" 2>/dev/null || \
+    LC_TIME=en_US.UTF-8 date -d "@$epoch" +"%-H:%M, %A, %Y-%m-%d" 2>/dev/null
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -374,16 +374,16 @@ if [ "$api_ms" -gt 0 ] 2>/dev/null; then
 fi
 
 # Cost (model-based pricing per 1M tokens, in cents)
-#   Opus:   $15 in, $75 out, $1.50 cache read, $18.75 cache write
-#   Sonnet: $3 in,  $15 out, $0.30 cache read, $3.75 cache write
-#   Haiku:  $0.80 in, $4 out, $0.08 cache read, $1.00 cache write
+#   Opus 4.6:   $5 in, $25 out, $0.50 cache read (0.1x), $6.25 cache write (1.25x)
+#   Sonnet 4.6: $3 in, $15 out, $0.30 cache read (0.1x), $3.75 cache write (1.25x)
+#   Haiku 4.5:  $1 in,  $5 out, $0.10 cache read (0.1x), $1.25 cache write (1.25x)
 case "$model_display" in
     Sonnet*)
         price_input=300;  price_output=1500; price_cache_read=30;  price_cache_write=375  ;;
     Haiku*)
-        price_input=80;   price_output=400;  price_cache_read=8;   price_cache_write=100  ;;
+        price_input=100;  price_output=500;  price_cache_read=10;  price_cache_write=125  ;;
     *)
-        price_input=1500; price_output=7500; price_cache_read=150; price_cache_write=1875 ;;
+        price_input=500;  price_output=2500; price_cache_read=50;  price_cache_write=625  ;;
 esac
 total_cents=$(( (input_tokens * price_input + output_tokens * price_output +
                  cache_read * price_cache_read + cache_write * price_cache_write) / 1000000 ))
@@ -420,16 +420,37 @@ api_warn_prefix=""
 [ "$api_ms" -ge 10000 ] 2>/dev/null && api_warn_prefix="${ICON_WARN} "
 
 # ═══════════════════════════════════════════════════════════════════
-# [L] CHIP RENDERING & OUTPUT
+# [L] CHIP RENDERING & OUTPUT (responsive to terminal width)
 # ═══════════════════════════════════════════════════════════════════
+term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
 
-# CHIP 1: folder + short path
+# Adaptive path: use leaf-only name when terminal is very narrow
+if [ "$term_width" -lt 60 ] 2>/dev/null; then
+    display_path=$(basename "$short_path")
+else
+    display_path="$short_path"
+fi
+
+# Adaptive context bar width
+if [ "$term_width" -lt 80 ] 2>/dev/null; then
+    ctx_filled_r=$(( context_pct * 3 / 100 ))
+    ctx_bar_r=""
+    for ((i=0; i<3; i++)); do
+        if [ $i -lt $ctx_filled_r ]; then ctx_bar_r+="$CTX_FILL"
+        else                              ctx_bar_r+="$CTX_EMPTY"
+        fi
+    done
+else
+    ctx_bar_r="$ctx_bar"
+fi
+
+# CHIP 1: folder + path
 printf "${FG_LEFT}${CAP_LEFT}${RESET}"
-printf "${BG_LEFT}${BOLD}${FG_LEFT_TEXT} ${ICON_FOLDER} %s ${RESET}" "$short_path"
+printf "${BG_LEFT}${BOLD}${FG_LEFT_TEXT} ${ICON_FOLDER} %s ${RESET}" "$display_path"
 printf "${FG_LEFT}${CAP_RIGHT}${RESET}"
 
-# CHIP 2: git info (only if inside a git repo)
-if [ -n "$git_branch" ]; then
+# CHIP 2: git info (skip in minimal width)
+if [ -n "$git_branch" ] && [ "$term_width" -ge 60 ] 2>/dev/null; then
     printf "%s" "$CHIP_SEP"
     printf "${FG_MID}${CAP_LEFT}${RESET}"
     printf "${BG_MID}${BOLD}${FG_MID_TEXT} ${ICON_GITHUB} ${ICON_BRANCH} %s${FG_MID_TEXT}%s${FG_MID_TEXT} ${RESET}" \
@@ -439,48 +460,83 @@ fi
 
 printf "%s" "$CHIP_SEP"
 
-# CHIP 3: model + context bar + cost + session ID
-chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar} ${context_pct}% ${ICON_DOLLAR} ${cost_display} ${ICON_KEY} ${session_short}"
+# CHIP 3: model + context + cost (+ session ID when wide enough)
+if [ "$term_width" -lt 60 ] 2>/dev/null; then
+    chip3_content="${ICON_BRAIN} ${model_display} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
+elif [ "$term_width" -lt 80 ] 2>/dev/null; then
+    chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
+else
+    chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display} ${ICON_KEY} ${session_short}"
+fi
 printf "${FG_RIGHT}${CAP_LEFT}${RESET}"
 printf "${BG_RIGHT}${BOLD}${FG_RIGHT_TEXT} %s ${RESET}" "$chip3_content"
 printf "${FG_RIGHT}${CAP_RIGHT}${RESET}"
 
-printf "%s" "$CHIP_SEP"
-
-# CHIP 4: cache efficiency + API response time (with optional warn prefix)
-chip4_content="${ICON_CHART} ${cache_pct}% ${ICON_BOLT} ${api_warn_prefix}${api_sec}s"
-printf "${FG_STATS}${CAP_LEFT}${RESET}"
-printf "${BG_STATS}${BOLD}${FG_STATS_TEXT} %s ${RESET}" "$chip4_content"
-printf "${FG_STATS}${CAP_RIGHT}${RESET}"
+# CHIP 4: cache efficiency + API time (hidden when narrow)
+if [ "$term_width" -ge 100 ] 2>/dev/null; then
+    printf "%s" "$CHIP_SEP"
+    chip4_content="${ICON_CHART} ${cache_pct}% ${ICON_BOLT} ${api_warn_prefix}${api_sec}s"
+    printf "${FG_STATS}${CAP_LEFT}${RESET}"
+    printf "${BG_STATS}${BOLD}${FG_STATS_TEXT} %s ${RESET}" "$chip4_content"
+    printf "${FG_STATS}${CAP_RIGHT}${RESET}"
+fi
 
 # ═══════════════════════════════════════════════════════════════════
-# ROW 2: USAGE BARS (5h / weekly) — only if OAuth token available
+# ROW 2: USAGE BARS (5h / weekly / sonnet / extra) — responsive
 # ═══════════════════════════════════════════════════════════════════
 render_usage_row() {
-    local label="$1" pct="$2" reset_time="$3" width=10
+    local label="$1" pct="$2" reset_time="$3"
+    local width=10
+    [ "$term_width" -lt 80 ] 2>/dev/null && width=6
     local usage_bar
     usage_bar=$(build_usage_bar "$pct" "$width")
     printf "\n${COLOR_WHITE}${BOLD}%-8s${RESET} " "$label"
     printf "%b" "$usage_bar"
-    printf "${COLOR_WHITE}%3s%% used ${DIM}|${RESET} ${COLOR_WHITE}Resets: %s${RESET}" "$pct" "$reset_time"
+    if [ "$term_width" -ge 80 ] 2>/dev/null; then
+        printf "${COLOR_WHITE}%3s%% used ${DIM}|${RESET} ${COLOR_WHITE}Resets: %s${RESET}" "$pct" "$reset_time"
+    else
+        printf "${COLOR_WHITE}%3s%%${RESET}" "$pct"
+    fi
 }
 
-api_usage=$(fetch_usage_data)
+api_usage=""
+[ "$term_width" -ge 60 ] 2>/dev/null && api_usage=$(fetch_usage_data)
 
 if [ -n "$api_usage" ]; then
     usage_fields=$(echo "$api_usage" | jq -r '
         [.five_hour.utilization // 0, .five_hour.resets_at // "",
-         .seven_day.utilization // 0, .seven_day.resets_at // ""]
+         .seven_day.utilization // 0, .seven_day.resets_at // "",
+         .seven_day_sonnet.utilization // -1, .seven_day_sonnet.resets_at // "",
+         .extra_usage.is_enabled // false, .extra_usage.utilization // -1,
+         .extra_usage.used_credits // "", .extra_usage.monthly_limit // ""]
         | map(tostring) | join("\t")
     ' 2>/dev/null)
 
     if [ -n "$usage_fields" ]; then
-        IFS=$'\t' read -r fh_util fh_reset sd_util sd_reset <<< "$usage_fields"
+        IFS=$'\t' read -r fh_util fh_reset sd_util sd_reset \
+            ss_util ss_reset ex_enabled ex_util ex_used ex_limit <<< "$usage_fields"
         five_hour_pct=$(awk "BEGIN {printf \"%.0f\", $fh_util}")
         seven_day_pct=$(awk "BEGIN {printf \"%.0f\", $sd_util}")
 
         render_usage_row "Current:" "$five_hour_pct" "$(format_reset_time "$fh_reset")"
         render_usage_row "Weekly:"  "$seven_day_pct" "$(format_reset_time "$sd_reset")"
+
+        # Sonnet-only weekly usage (only when field exists)
+        if [ "$ss_util" != "-1" ] && [ -n "$ss_util" ]; then
+            sonnet_pct=$(awk "BEGIN {printf \"%.0f\", $ss_util}")
+            render_usage_row "Sonnet:" "$sonnet_pct" "$(format_reset_time "$ss_reset")"
+        fi
+
+        # Extra usage (add-on) indicator
+        if [ "$ex_enabled" = "true" ]; then
+            if [ "$ex_util" != "-1" ] && [ -n "$ex_util" ]; then
+                extra_pct=$(awk "BEGIN {printf \"%.0f\", $ex_util}")
+                render_usage_row "Extra:" "$extra_pct" "${ex_used:-0}/${ex_limit:-?} credits"
+            else
+                printf "\n${COLOR_WHITE}${BOLD}%-8s${RESET} " "Extra:"
+                printf "${COLOR_WHITE}Enabled ${DIM}|${RESET} ${COLOR_WHITE}${ex_used:-0}/${ex_limit:-?} credits used${RESET}"
+            fi
+        fi
     fi
 fi
 

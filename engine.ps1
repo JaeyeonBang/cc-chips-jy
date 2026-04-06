@@ -106,10 +106,12 @@ $ctxFilled = [int]($contextPct * 5 / 100)
 $ctxBar    = ("#" * $ctxFilled) + ("-" * (5 - $ctxFilled))
 
 # Cost calculation (per 1M tokens, in cents)
+# Opus 4.6: $5/$25, Sonnet 4.6: $3/$15, Haiku 4.5: $1/$5
+# Cache read: 0.1x input, Cache write: 1.25x input
 $priceIn, $priceOut, $priceCR, $priceCW = switch -Regex ($modelDisplay) {
     "^Sonnet" { 300,  1500,  30,  375;  break }
-    "^Haiku"  { 80,   400,   8,   100;  break }
-    default   { 1500, 7500,  150, 1875       }
+    "^Haiku"  { 100,  500,   10,  125;  break }
+    default   { 500,  2500,  50,  625        }
 }
 $costCents = [long](($inputTok * $priceIn + $outputTok * $priceOut +
                      $cacheRead * $priceCR + $cacheWrite * $priceCW) / 1000000)
