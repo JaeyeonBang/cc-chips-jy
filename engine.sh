@@ -252,7 +252,12 @@ TRANSCRIPT_CACHE="/tmp/claude/transcript-cache.json"
 
 _fetch_transcript_activity() {
     local path="$1"
-    [ -z "$path" ] || [ ! -f "$path" ] && return
+    [ -z "$path" ] && return
+    # Convert Windows path (C:\...) to Git Bash Unix path (/c/...) if needed
+    if [[ "$path" =~ ^[A-Za-z]:\\ ]]; then
+        path=$(cygpath -u "$path" 2>/dev/null || echo "$path")
+    fi
+    [ ! -f "$path" ] && return
 
     local path_mtime
     path_mtime=$(_file_mtime "$path")
