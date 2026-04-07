@@ -259,6 +259,7 @@ _fetch_transcript_activity() {
     fi
     [ ! -f "$path" ] && return
 
+    mkdir -p /tmp/claude 2>/dev/null
     local path_mtime
     path_mtime=$(_file_mtime "$path")
 
@@ -306,6 +307,7 @@ _fetch_transcript_activity() {
 CONFIG_CACHE="/tmp/claude/config-counts.json"
 
 _fetch_config_counts() {
+    mkdir -p /tmp/claude 2>/dev/null
     local settings="${HOME}/.claude/settings.json"
     local settings_mtime
     settings_mtime=$(_file_mtime "$settings" 2>/dev/null || echo 0)
@@ -384,8 +386,13 @@ format_reset_time() {
         epoch=$(iso_to_epoch "$ts")
     fi
     [ -z "$epoch" ] && return
-    LC_TIME=en_US.UTF-8 date -j -r "$epoch" +"%-H:%M, %A, %Y-%m-%d" 2>/dev/null || \
-    LC_TIME=en_US.UTF-8 date -d "@$epoch" +"%-H:%M, %A, %Y-%m-%d" 2>/dev/null
+    local formatted
+    # BSD date (macOS): date -j -r epoch; GNU date (Linux): date -d @epoch
+    # %-H is GNU-only; strip leading zero with sed for cross-platform support
+    formatted=$(LC_TIME=en_US.UTF-8 date -j -r "$epoch" +"%H:%M, %A, %Y-%m-%d" 2>/dev/null)
+    [ -z "$formatted" ] && \
+        formatted=$(LC_TIME=en_US.UTF-8 date -d "@$epoch" +"%H:%M, %A, %Y-%m-%d" 2>/dev/null)
+    echo "$formatted" | sed 's/^0//'
 }
 
 # ═══════════════════════════════════════════════════════════════════

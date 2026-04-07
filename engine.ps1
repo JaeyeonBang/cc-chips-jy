@@ -125,6 +125,74 @@ $costDisplay = if ($costCents -eq 0)        { '$0' }
                elseif ($costCents -lt 100)  { '$0.{0:D2}' -f [int]$costCents }
                else { '$' + [int]($costCents / 100) + '.{0:D2}' -f ($costCents % 100) }
 
+# Transcript path (for Chip 5)
+$transcriptPath = Get-Nested $data @("transcript_path") ""
+
+# ── Transcript activity (Chip 5) ─────────────────────────────────
+function Get-TranscriptActivity {
+    param([string]$path)
+    if ([string]::IsNullOrEmpty($path) -or -not (Test-Path $path)) { return $null }
+    $lines = Get-Content $path -Tail 200 -ErrorAction SilentlyContinue
+    $toolUses   = [System.Collections.Generic.List[object]]::new()
+    $resultIds  = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        try {
+            $obj = $line | ConvertFrom-Json -ErrorAction Stop
+            $content = $obj.message.content
+            if ($content -is [array]) {
+                foreach ($item in $content) {
+                    if ($item.type -eq "tool_use") {
+                        $toolUses.Add([PSCustomObject]@{ id = $item.id; name = $item.name })
+                    } elseif ($item.type -eq "tool_result") {
+                        [void]$resultIds.Add($item.tool_use_id)
+                    }
+                }
+            }
+        } catch { }
+    }
+    $running = ($toolUses | Where-Object { -not $resultIds.Contains($_.id) } | Select-Object -Last 1)
+    $lastTool = if ($toolUses.Count -gt 0) { $toolUses[$toolUses.Count - 1].name } else { "" }
+    return [PSCustomObject]@{
+        running    = if ($running) { $running.name } else { "" }
+        last_tool  = $lastTool
+        tool_count = $toolUses.Count
+    }
+}
+
+# ── Config counts (Chip 6) ────────────────────────────────────────
+function Get-ConfigCounts {
+    $settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
+    $mcpCount = 0; $hooksCount = 0; $skillsCount = 0
+    if (Test-Path $settingsPath) {
+        try {
+            $s = Get-Content $settingsPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($s.PSObject.Properties["mcpServers"]) {
+                $mcpCount = ($s.mcpServers.PSObject.Properties |
+                    Where-Object { $_.Value.disabled -ne $true } | Measure-Object).Count
+            }
+            if ($s.PSObject.Properties["hooks"]) {
+                $hooksCount = ($s.hooks.PSObject.Properties | Measure-Object).Count
+            }
+        } catch { }
+    }
+    # Also count project-level .mcp.json
+    if (Test-Path ".mcp.json") {
+        try {
+            $mcp = Get-Content ".mcp.json" -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($mcp.PSObject.Properties["mcpServers"]) {
+                $mcpCount += ($mcp.mcpServers.PSObject.Properties |
+                    Where-Object { $_.Value.disabled -ne $true } | Measure-Object).Count
+            }
+        } catch { }
+    }
+    $skillsDir = Join-Path $env:USERPROFILE ".claude\skills"
+    if (Test-Path $skillsDir) {
+        $skillsCount = (Get-ChildItem $skillsDir -ErrorAction SilentlyContinue | Measure-Object).Count
+    }
+    return [PSCustomObject]@{ mcp = $mcpCount; hooks = $hooksCount; skills = $skillsCount }
+}
+
 # ── Git detection ─────────────────────────────────────────────────
 $gitBranch = ""
 $gitDirty  = ""
@@ -156,4 +224,21 @@ $chip3 = if ($disconnected) {
 }
 $chip4 = if (-not $chipsQuiet) { " [= ${cachePct}% ! ${apiWarn}${apiSec}s]" } else { "" }
 
-Write-Output "${chip1}${chip2}${chip3}${chip4}"
+# CHIP 5: tool activity
+$chip5 = ""
+if (-not [string]::IsNullOrEmpty($transcriptPath)) {
+    $activity = Get-TranscriptActivity $transcriptPath
+    if ($null -ne $activity) {
+        if (-not [string]::IsNullOrEmpty($activity.running)) {
+            $chip5 = " [>> $($activity.running) ...]"
+        } elseif (-not [string]::IsNullOrEmpty($activity.last_tool)) {
+            $chip5 = " [OK $($activity.last_tool) x$($activity.tool_count)]"
+        }
+    }
+}
+
+# CHIP 6: config counts
+$cfg = Get-ConfigCounts
+$chip6 = " [MCP: $($cfg.mcp) | Hooks: $($cfg.hooks) | Skills: $($cfg.skills)]"
+
+Write-Output "${chip1}${chip2}${chip3}${chip4}${chip5}${chip6}"
