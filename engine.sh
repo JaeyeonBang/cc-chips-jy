@@ -79,7 +79,7 @@ else
     ICON_BOLT=$(printf '\xef\x83\xa7')          # U+F0E7  fa-bolt
     ICON_WARN="!!"
     ICON_TOOL=$(printf '\xef\x83\x82')          # U+F0C2  wrench
-    ICON_RUNNING=$(printf '\xee\x97\xb3')       # U+E5F3  nf-md-loading
+    ICON_RUNNING="▶"                              # U+25B6  standard unicode play
     ICON_DONE=$(printf '\xef\x80\x9c')          # U+F01C  check-circle
     ICON_SERVER=$(printf '\xef\x83\xb8')        # U+F0F8  server
     CTX_FILL="■"
@@ -702,9 +702,9 @@ fi
 chip6_content=""
 _cc=$(_fetch_config_counts)
 if [ -n "$_cc" ] && [ "$_cc" != "null" ]; then
-    IFS=$'\t' read -r _mcp _hooks _skills <<< \
-        "$(echo "$_cc" | jq -r '[(.mcp//0|tostring), (.hooks//0|tostring), (.skills//0|tostring)] | join("\t")' 2>/dev/null)"
-    chip6_content="${ICON_SERVER} MCP: ${_mcp} | Hooks: ${_hooks} | Skills: ${_skills}"
+    IFS=$'\t' read -r _hooks _skills <<< \
+        "$(echo "$_cc" | jq -r '[(.hooks//0|tostring), (.skills//0|tostring)] | join("\t")' 2>/dev/null)"
+    chip6_content="${ICON_SERVER} Hooks: ${_hooks} | Skills: ${_skills}"
 fi
 
 # CHIP 4: render inline when wide enough
