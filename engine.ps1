@@ -98,8 +98,14 @@ $contextPct = if ($ctxSize -gt 0) { [int]($currentCtx * 100 / $ctxSize) } else {
 $totalCtxTok = $inputTok + $cacheRead + $cacheWrite
 $cachePct    = if ($totalCtxTok -gt 0) { [int]($cacheRead * 100 / $totalCtxTok) } else { 0 }
 
-$apiSec  = if ($apiMs -gt 0) { "{0:F1}" -f ($apiMs / 1000.0) } else { "0.0" }
-$apiWarn = if ($apiMs -ge 10000) { "!! " } else { "" }
+# api_ms sentinel cap: CC emits ~4096000ms on connection drop
+$apiMsCapped = $apiMs -ge 60000
+$apiSec  = if ($apiMsCapped)   { "60+" }
+           elseif ($apiMs -gt 0) { "{0:F1}" -f ($apiMs / 1000.0) }
+           else { "0.0" }
+$apiWarn = if ($apiMsCapped)        { "DISC " }
+           elseif ($apiMs -ge 10000) { "!! " }
+           else { "" }
 
 # Context bar (5 chars)
 $ctxFilled = [int]($contextPct * 5 / 100)
@@ -134,10 +140,20 @@ try {
     }
 } catch { }
 
+# ── DISCONNECTED state ───────────────────────────────────────────
+$disconnected = ($sessionId -eq "unknown") -or ($ctxSize -le 0)
+
+# ── Progressive disclosure: hide chip4 when all metrics healthy ──
+$chipsQuiet = ($contextPct -lt 50) -and ($cachePct -ge 20) -and (-not $disconnected) -and (-not $apiMsCapped)
+
 # ── Build output (ASCII, no ANSI) ────────────────────────────────
 $chip1 = "[# $shortPath]"
 $chip2 = if ($gitBranch) { " [> @ $gitBranch$gitDirty]" } else { "" }
-$chip3 = " [~ $modelDisplay % [$ctxBar] $contextPct% $ $costDisplay & $sessionShort]"
-$chip4 = " [= ${cachePct}% ! ${apiWarn}${apiSec}s]"
+$chip3 = if ($disconnected) {
+    " [DISC : [$ctxBar] $contextPct% $ $costDisplay]"
+} else {
+    " [~ $modelDisplay % [$ctxBar] $contextPct% $ $costDisplay & $sessionShort]"
+}
+$chip4 = if (-not $chipsQuiet) { " [= ${cachePct}% ! ${apiWarn}${apiSec}s]" } else { "" }
 
 Write-Output "${chip1}${chip2}${chip3}${chip4}"

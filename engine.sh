@@ -165,13 +165,12 @@ _refresh_usage_cache() {
             -H "anthropic-beta: oauth-2025-04-20" \
             "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
         if [ -n "$response" ] && echo "$response" | jq -e '.five_hour' >/dev/null 2>&1; then
-            echo "$response" > "$USAGE_CACHE"
-        else
-            touch "$USAGE_CACHE" 2>/dev/null
+            local tmp="${USAGE_CACHE}.tmp"
+            echo "$response" > "$tmp" && mv -f "$tmp" "$USAGE_CACHE"
         fi
-    else
-        touch "$USAGE_CACHE" 2>/dev/null
+        # On failure: do NOT touch — old cache mtime = last good data
     fi
+    # No token: do NOT touch — preserve existing cache
     rm -f "$USAGE_CACHE_LOCK"
 }
 
@@ -198,6 +197,7 @@ fetch_usage_data() {
         cache_mtime=$(_file_mtime "$USAGE_CACHE")
         now=$(date +%s)
         cache_age=$(( now - cache_mtime ))
+        [ "$cache_age" -ge "${USAGE_STALE_THRESHOLD:-120}" ] && USAGE_STALE=1
         if [ "$cache_age" -ge "$USAGE_CACHE_HARD_STALE" ] || _cache_past_reset; then
             _refresh_usage_cache
         elif [ "$cache_age" -ge "$USAGE_CACHE_MAX_AGE" ]; then
@@ -246,10 +246,14 @@ iso_to_epoch() {
 }
 
 format_reset_time() {
-    local iso_str="$1"
-    [ -z "$iso_str" ] || [ "$iso_str" = "null" ] && return
+    local ts="$1"
+    [ -z "$ts" ] || [ "$ts" = "null" ] && return
     local epoch
-    epoch=$(iso_to_epoch "$iso_str")
+    if [[ "$ts" =~ ^[0-9]+$ ]]; then
+        epoch="$ts"          # already a Unix timestamp (stdin rate_limits)
+    else
+        epoch=$(iso_to_epoch "$ts")
+    fi
     [ -z "$epoch" ] && return
     LC_TIME=en_US.UTF-8 date -j -r "$epoch" +"%-H:%M, %A, %Y-%m-%d" 2>/dev/null || \
     LC_TIME=en_US.UTF-8 date -d "@$epoch" +"%-H:%M, %A, %Y-%m-%d" 2>/dev/null
@@ -306,6 +310,27 @@ IFS=$'\t' read -r project_dir session_id model_raw \
         (.context_window.context_window_size // 0 | tostring),
         (.cost.total_api_duration_ms // 0 | tostring)
     ] | join("\t")' 2>/dev/null)"
+
+# stdin rate_limits (CC v2.1.80+): direct usage data without OAuth polling
+stdin_has_rate_limits=0
+sl_fh_pct=-1; sl_fh_reset=""; sl_sd_pct=-1; sl_sd_reset=""
+_rl_raw=$(echo "$input" | jq -r '
+    if .rate_limits then
+        [
+            (.rate_limits.five_hour.used_percentage // -1 | tostring),
+            (.rate_limits.five_hour.resets_at // "" | tostring),
+            (.rate_limits.seven_day.used_percentage // -1 | tostring),
+            (.rate_limits.seven_day.resets_at // "" | tostring)
+        ] | join("\t")
+    else "ABSENT" end
+' 2>/dev/null)
+if [ "$_rl_raw" != "ABSENT" ] && [ -n "$_rl_raw" ]; then
+    stdin_has_rate_limits=1
+    IFS=$'\t' read -r sl_fh_pct sl_fh_reset sl_sd_pct sl_sd_reset <<< "$_rl_raw"
+fi
+
+# transcript_path: for Phase 3 agent/tool chip
+transcript_path=$(echo "$input" | jq -r '.transcript_path // ""' 2>/dev/null)
 
 # ═══════════════════════════════════════════════════════════════════
 # [I] GIT DETECTION
@@ -415,14 +440,51 @@ elif [ "$cache_pct" -lt 20 ];  then
     FG_STATS="$ALERT_FG_YELLOW"; BG_STATS="$ALERT_BG_YELLOW"
 fi
 
-# API warn prefix: >= 10s or literal "timeout" → prepend warning icon
+# API response time: cap sentinel values
+# CC emits ~4096000ms (4096s) in cost.total_api_duration_ms on connection drop
+api_ms_capped=0
+if [ "$api_ms" -ge 60000 ] 2>/dev/null; then
+    api_ms_capped=1
+    api_sec="60+"
+fi
+
+# API warn prefix
 api_warn_prefix=""
-[ "$api_ms" -ge 10000 ] 2>/dev/null && api_warn_prefix="${ICON_WARN} "
+if [ "$api_ms_capped" -eq 1 ]; then
+    api_warn_prefix="DISC "
+elif [ "$api_ms" -ge 10000 ] 2>/dev/null; then
+    api_warn_prefix="${ICON_WARN} "
+fi
 
 # ═══════════════════════════════════════════════════════════════════
 # [L] CHIP RENDERING & OUTPUT (responsive to terminal width)
 # ═══════════════════════════════════════════════════════════════════
 term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+
+# ── Usage data (fetched early for DISCONNECTED + CHIPS_QUIET logic) ──
+api_usage=""
+USAGE_STALE=0
+[ "$term_width" -ge 60 ] 2>/dev/null && api_usage=$(fetch_usage_data)
+
+# DISCONNECTED: stale cache, no session, or no context window
+DISCONNECTED=0
+[ "$USAGE_STALE" -eq 1 ] && DISCONNECTED=1
+[ "$session_id" = "unknown" ] && DISCONNECTED=1
+[ "$context_size" -le 0 ] 2>/dev/null && DISCONNECTED=1
+
+# Progressive disclosure: hide chip 4 when all metrics are healthy
+_quiet_usage_pct=0
+if [ -n "$api_usage" ]; then
+    _fh_util=$(echo "$api_usage" | jq -r '.five_hour.utilization // 0' 2>/dev/null)
+    _quiet_usage_pct=$(awk "BEGIN {printf \"%.0f\", ${_fh_util:-0}}")
+fi
+CHIPS_QUIET=0
+if [ "$context_pct" -lt 50 ] && [ "$cache_pct" -ge 20 ] && \
+   [ "${_quiet_usage_pct:-0}" -lt 80 ] && [ "$USAGE_STALE" -eq 0 ]; then
+    CHIPS_QUIET=1
+fi
+[ "$DISCONNECTED" -eq 1 ] && CHIPS_QUIET=0    # DISCONNECTED always shows chip 4
+[ "${api_ms_capped:-0}" -eq 1 ] && CHIPS_QUIET=0  # extreme API latency always shows chip 4
 
 # Adaptive path: use leaf-only name when terminal is very narrow
 if [ "$term_width" -lt 60 ] 2>/dev/null; then
@@ -460,8 +522,12 @@ fi
 
 printf "%s" "$CHIP_SEP"
 
-# CHIP 3: model + context + cost (+ session ID when wide enough)
-if [ "$term_width" -lt 60 ] 2>/dev/null; then
+# CHIP 3: model + context + cost (DISCONNECTED overrides model display)
+if [ "$DISCONNECTED" -eq 1 ]; then
+    FG_RIGHT="$ALERT_FG_RED"
+    BG_RIGHT="$ALERT_BG_RED"
+    chip3_content="DISC ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
+elif [ "$term_width" -lt 60 ] 2>/dev/null; then
     chip3_content="${ICON_BRAIN} ${model_display} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
 elif [ "$term_width" -lt 80 ] 2>/dev/null; then
     chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
@@ -472,8 +538,8 @@ printf "${FG_RIGHT}${CAP_LEFT}${RESET}"
 printf "${BG_RIGHT}${BOLD}${FG_RIGHT_TEXT} %s ${RESET}" "$chip3_content"
 printf "${FG_RIGHT}${CAP_RIGHT}${RESET}"
 
-# CHIP 4: cache efficiency + API time (hidden when narrow)
-if [ "$term_width" -ge 100 ] 2>/dev/null; then
+# CHIP 4: cache efficiency + API time (hidden when narrow or all metrics healthy)
+if [ "$term_width" -ge 100 ] 2>/dev/null && [ "$CHIPS_QUIET" -eq 0 ]; then
     printf "%s" "$CHIP_SEP"
     chip4_content="${ICON_CHART} ${cache_pct}% ${ICON_BOLT} ${api_warn_prefix}${api_sec}s"
     printf "${FG_STATS}${CAP_LEFT}${RESET}"
@@ -499,42 +565,52 @@ render_usage_row() {
     fi
 }
 
-api_usage=""
-[ "$term_width" -ge 60 ] 2>/dev/null && api_usage=$(fetch_usage_data)
-
-if [ -n "$api_usage" ]; then
-    usage_fields=$(echo "$api_usage" | jq -r '
-        [.five_hour.utilization // 0, .five_hour.resets_at // "",
-         .seven_day.utilization // 0, .seven_day.resets_at // "",
-         .seven_day_sonnet.utilization // -1, .seven_day_sonnet.resets_at // "",
-         .extra_usage.is_enabled // false, .extra_usage.utilization // -1,
-         .extra_usage.used_credits // "", .extra_usage.monthly_limit // ""]
-        | map(tostring) | join("\t")
-    ' 2>/dev/null)
-
-    if [ -n "$usage_fields" ]; then
-        IFS=$'\t' read -r fh_util fh_reset sd_util sd_reset \
-            ss_util ss_reset ex_enabled ex_util ex_used ex_limit <<< "$usage_fields"
-        five_hour_pct=$(awk "BEGIN {printf \"%.0f\", $fh_util}")
-        seven_day_pct=$(awk "BEGIN {printf \"%.0f\", $sd_util}")
-
-        render_usage_row "Current:" "$five_hour_pct" "$(format_reset_time "$fh_reset")"
-        render_usage_row "Weekly:"  "$seven_day_pct" "$(format_reset_time "$sd_reset")"
-
-        # Sonnet-only weekly usage (only when field exists)
-        if [ "$ss_util" != "-1" ] && [ -n "$ss_util" ]; then
-            sonnet_pct=$(awk "BEGIN {printf \"%.0f\", $ss_util}")
-            render_usage_row "Sonnet:" "$sonnet_pct" "$(format_reset_time "$ss_reset")"
+# Row 2: use stdin rate_limits when available (CC v2.1.80+), else OAuth cache
+# api_usage already fetched above (before chip rendering)
+if [ "$term_width" -ge 60 ] 2>/dev/null; then
+    if [ "$stdin_has_rate_limits" -eq 1 ]; then
+        if [ "${sl_fh_pct}" != "-1" ] && [ -n "$sl_fh_pct" ]; then
+            five_hour_pct=$(awk "BEGIN {printf \"%.0f\", $sl_fh_pct}")
+            render_usage_row "Current:" "$five_hour_pct" "$(format_reset_time "$sl_fh_reset")"
         fi
+        if [ "${sl_sd_pct}" != "-1" ] && [ -n "$sl_sd_pct" ]; then
+            seven_day_pct=$(awk "BEGIN {printf \"%.0f\", $sl_sd_pct}")
+            render_usage_row "Weekly:"  "$seven_day_pct" "$(format_reset_time "$sl_sd_reset")"
+        fi
+    elif [ -n "$api_usage" ]; then
+        usage_fields=$(echo "$api_usage" | jq -r '
+            [.five_hour.utilization // 0, .five_hour.resets_at // "",
+             .seven_day.utilization // 0, .seven_day.resets_at // "",
+             .seven_day_sonnet.utilization // -1, .seven_day_sonnet.resets_at // "",
+             .extra_usage.is_enabled // false, .extra_usage.utilization // -1,
+             .extra_usage.used_credits // "", .extra_usage.monthly_limit // ""]
+            | map(tostring) | join("\t")
+        ' 2>/dev/null)
 
-        # Extra usage (add-on) indicator
-        if [ "$ex_enabled" = "true" ]; then
-            if [ "$ex_util" != "-1" ] && [ -n "$ex_util" ]; then
-                extra_pct=$(awk "BEGIN {printf \"%.0f\", $ex_util}")
-                render_usage_row "Extra:" "$extra_pct" "${ex_used:-0}/${ex_limit:-?} credits"
-            else
-                printf "\n${COLOR_WHITE}${BOLD}%-8s${RESET} " "Extra:"
-                printf "${COLOR_WHITE}Enabled ${DIM}|${RESET} ${COLOR_WHITE}${ex_used:-0}/${ex_limit:-?} credits used${RESET}"
+        if [ -n "$usage_fields" ]; then
+            IFS=$'\t' read -r fh_util fh_reset sd_util sd_reset \
+                ss_util ss_reset ex_enabled ex_util ex_used ex_limit <<< "$usage_fields"
+            five_hour_pct=$(awk "BEGIN {printf \"%.0f\", $fh_util}")
+            seven_day_pct=$(awk "BEGIN {printf \"%.0f\", $sd_util}")
+
+            render_usage_row "Current:" "$five_hour_pct" "$(format_reset_time "$fh_reset")"
+            render_usage_row "Weekly:"  "$seven_day_pct" "$(format_reset_time "$sd_reset")"
+
+            # Sonnet-only weekly usage (only when field exists)
+            if [ "$ss_util" != "-1" ] && [ -n "$ss_util" ]; then
+                sonnet_pct=$(awk "BEGIN {printf \"%.0f\", $ss_util}")
+                render_usage_row "Sonnet:" "$sonnet_pct" "$(format_reset_time "$ss_reset")"
+            fi
+
+            # Extra usage (add-on) indicator
+            if [ "$ex_enabled" = "true" ]; then
+                if [ "$ex_util" != "-1" ] && [ -n "$ex_util" ]; then
+                    extra_pct=$(awk "BEGIN {printf \"%.0f\", $ex_util}")
+                    render_usage_row "Extra:" "$extra_pct" "${ex_used:-0}/${ex_limit:-?} credits"
+                else
+                    printf "\n${COLOR_WHITE}${BOLD}%-8s${RESET} " "Extra:"
+                    printf "${COLOR_WHITE}Enabled ${DIM}|${RESET} ${COLOR_WHITE}${ex_used:-0}/${ex_limit:-?} credits used${RESET}"
+                fi
             fi
         fi
     fi
