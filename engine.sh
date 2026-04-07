@@ -591,7 +591,7 @@ term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
 # ── Usage data (fetched early for DISCONNECTED + CHIPS_QUIET logic) ──
 api_usage=""
 USAGE_STALE=0
-[ "$term_width" -ge 60 ] 2>/dev/null && api_usage=$(fetch_usage_data)
+api_usage=$(fetch_usage_data)
 
 # DISCONNECTED: stale cache, no session, or no context window
 DISCONNECTED=0
@@ -641,12 +641,15 @@ printf "${FG_LEFT}${CAP_LEFT}${RESET}"
 printf "${BG_LEFT}${BOLD}${FG_LEFT_TEXT} ${ICON_FOLDER} %s ${RESET}" "$display_path"
 printf "${FG_LEFT}${CAP_RIGHT}${RESET}"
 
-# CHIP 2: git info (skip in minimal width)
-if [ -n "$git_branch" ] && [ "$term_width" -ge 60 ] 2>/dev/null; then
+# CHIP 2: git info — inline when wide enough, overflow to Row 3 when narrow
+# Pre-compute content always so Row 3 can pick it up at < 60 cols.
+chip2_content=""
+[ -n "$git_branch" ] && chip2_content="${ICON_GITHUB} ${ICON_BRANCH} ${git_branch}${git_dirty}"
+
+if [ -n "$chip2_content" ] && [ "$term_width" -ge 60 ] 2>/dev/null; then
     printf "%s" "$CHIP_SEP"
     printf "${FG_MID}${CAP_LEFT}${RESET}"
-    printf "${BG_MID}${BOLD}${FG_MID_TEXT} ${ICON_GITHUB} ${ICON_BRANCH} %s${FG_MID_TEXT}%s${FG_MID_TEXT} ${RESET}" \
-        "$git_branch" "$git_dirty"
+    printf "${BG_MID}${BOLD}${FG_MID_TEXT} %s${FG_MID_TEXT} ${RESET}" "$chip2_content"
     printf "${FG_MID}${CAP_RIGHT}${RESET}"
 fi
 
@@ -657,6 +660,8 @@ if [ "$DISCONNECTED" -eq 1 ]; then
     FG_RIGHT="$ALERT_FG_RED"
     BG_RIGHT="$ALERT_BG_RED"
     chip3_content="DISC ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
+elif [ "$term_width" -lt 40 ] 2>/dev/null; then
+    chip3_content="${model_display} ${context_pct}%"
 elif [ "$term_width" -lt 60 ] 2>/dev/null; then
     chip3_content="${ICON_BRAIN} ${model_display} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
 elif [ "$term_width" -lt 80 ] 2>/dev/null; then
@@ -733,9 +738,16 @@ render_usage_row() {
     local label="$1" pct="$2" reset_time="$3"
     local width=10
     [ "$term_width" -lt 80 ] 2>/dev/null && width=6
+    [ "$term_width" -lt 60 ] 2>/dev/null && width=4
     local usage_bar
     usage_bar=$(build_usage_bar "$pct" "$width")
-    printf "\n${COLOR_WHITE}${BOLD}%-8s${RESET} " "$label"
+    if [ "$term_width" -lt 60 ] 2>/dev/null; then
+        # Very narrow: compact label (4 chars) + bar + pct
+        local short_label="${label:0:4}"
+        printf "\n${COLOR_WHITE}${BOLD}%-4s${RESET} " "$short_label"
+    else
+        printf "\n${COLOR_WHITE}${BOLD}%-8s${RESET} " "$label"
+    fi
     printf "%b" "$usage_bar"
     if [ "$term_width" -ge 80 ] 2>/dev/null; then
         printf "${COLOR_WHITE}%3s%% used ${DIM}|${RESET} ${COLOR_WHITE}Resets: %s${RESET}" "$pct" "$reset_time"
@@ -746,7 +758,8 @@ render_usage_row() {
 
 # Row 2: use stdin rate_limits when available (CC v2.1.80+), else OAuth cache
 # api_usage already fetched above (before chip rendering)
-if [ "$term_width" -ge 60 ] 2>/dev/null; then
+# Always rendered — width gates removed so all usage data is visible on any terminal size.
+if true; then
     if [ "$stdin_has_rate_limits" -eq 1 ]; then
         if [ "${sl_fh_pct}" != "-1" ] && [ -n "$sl_fh_pct" ]; then
             five_hour_pct=$(awk "BEGIN {printf \"%.0f\", $sl_fh_pct}")
@@ -797,28 +810,45 @@ fi
 
 # ═══════════════════════════════════════════════════════════════════
 # ROW 3: overflow chips — visible on all terminal widths
-# Chips that didn't fit in Row 1 are placed here, on the same line.
+# Chips that didn't fit in Row 1 (due to narrow terminal) appear here.
+# Order: chip2 (git) → chip4 (cache) → chip5 (activity) → chip6 (config)
 # ═══════════════════════════════════════════════════════════════════
-_row3_open=0   # 1 after the row's leading newline is printed
+_row3_open=0   # becomes 1 after the row's leading newline is printed
 
+_row3_open_if_needed() {
+    [ "$_row3_open" -eq 0 ] && printf "\n" && _row3_open=1
+}
+
+# Chip 2 overflow: git info when terminal is too narrow to show inline (< 60)
+if [ -n "$chip2_content" ] && [ "$term_width" -lt 60 ] 2>/dev/null; then
+    _row3_open_if_needed
+    printf "%s" "$CHIP_SEP"
+    printf "${FG_MID}${CAP_LEFT}${RESET}"
+    printf "${BG_MID}${BOLD}${FG_MID_TEXT} %s${FG_MID_TEXT} ${RESET}" "$chip2_content"
+    printf "${FG_MID}${CAP_RIGHT}${RESET}"
+fi
+
+# Chip 4 overflow (CHIPS_QUIET still gates — if all healthy, nothing to show)
 if [ -n "$chip4_content" ] && [ "$term_width" -lt 100 ] 2>/dev/null; then
-    printf "\n"; _row3_open=1
+    _row3_open_if_needed
     printf "%s" "$CHIP_SEP"
     printf "${FG_STATS}${CAP_LEFT}${RESET}"
     printf "${BG_STATS}${BOLD}${FG_STATS_TEXT} %s ${RESET}" "$chip4_content"
     printf "${FG_STATS}${CAP_RIGHT}${RESET}"
 fi
 
+# Chip 5 overflow
 if [ -n "$chip5_content" ] && [ "$term_width" -lt 100 ] 2>/dev/null; then
-    [ "$_row3_open" -eq 0 ] && printf "\n" && _row3_open=1
+    _row3_open_if_needed
     printf "%s" "$CHIP_SEP"
     printf "${_c5_fg}${CAP_LEFT}${RESET}"
     printf "${_c5_bg}${BOLD}${FG_ACTIVITY_TEXT} %s ${RESET}" "$chip5_content"
     printf "${_c5_fg}${CAP_RIGHT}${RESET}"
 fi
 
+# Chip 6 overflow
 if [ -n "$chip6_content" ] && [ "$term_width" -lt 120 ] 2>/dev/null; then
-    [ "$_row3_open" -eq 0 ] && printf "\n" && _row3_open=1
+    _row3_open_if_needed
     printf "%s" "$CHIP_SEP"
     printf "${FG_CONFIG}${CAP_LEFT}${RESET}"
     printf "${BG_CONFIG}${BOLD}${FG_CONFIG_TEXT} %s ${RESET}" "$chip6_content"
