@@ -668,17 +668,18 @@ printf "${FG_RIGHT}${CAP_LEFT}${RESET}"
 printf "${BG_RIGHT}${BOLD}${FG_RIGHT_TEXT} %s ${RESET}" "$chip3_content"
 printf "${FG_RIGHT}${CAP_RIGHT}${RESET}"
 
-# CHIP 4: cache efficiency + API time (hidden when narrow or all metrics healthy)
-if [ "$term_width" -ge 100 ] 2>/dev/null && [ "$CHIPS_QUIET" -eq 0 ]; then
-    printf "%s" "$CHIP_SEP"
+# ── Pre-compute chip 4/5/6 content (always, regardless of width) ──────────────
+# Content computed here so Row 3 can render overflow chips on narrow terminals.
+
+# Chip 4 content (CHIPS_QUIET suppresses this by content, not by layout)
+chip4_content=""
+if [ "$CHIPS_QUIET" -eq 0 ]; then
     chip4_content="${ICON_CHART} ${cache_pct}% ${ICON_BOLT} ${api_warn_prefix}${api_sec}s"
-    printf "${FG_STATS}${CAP_LEFT}${RESET}"
-    printf "${BG_STATS}${BOLD}${FG_STATS_TEXT} %s ${RESET}" "$chip4_content"
-    printf "${FG_STATS}${CAP_RIGHT}${RESET}"
 fi
 
-# CHIP 5: tool activity — running tool or last tool + count (width >= 100)
-if [ "$term_width" -ge 100 ] 2>/dev/null && [ -n "$transcript_path" ]; then
+# Chip 5 content
+chip5_content=""; _c5_fg="$FG_ACTIVITY"; _c5_bg="$BG_ACTIVITY"
+if [ -n "$transcript_path" ]; then
     _ta=$(_fetch_transcript_activity "$transcript_path")
     if [ -n "$_ta" ] && [ "$_ta" != "null" ]; then
         IFS=$'\t' read -r _running _last _count <<< \
@@ -688,29 +689,41 @@ if [ "$term_width" -ge 100 ] 2>/dev/null && [ -n "$transcript_path" ]; then
             _c5_fg="$ALERT_FG_ORANGE"; _c5_bg="$ALERT_BG_ORANGE"
         elif [ -n "$_last" ]; then
             chip5_content="${ICON_DONE} ${_last} · ${_count}"
-            _c5_fg="$FG_ACTIVITY"; _c5_bg="$BG_ACTIVITY"
-        fi
-        if [ -n "${chip5_content:-}" ]; then
-            printf "%s" "$CHIP_SEP"
-            printf "${_c5_fg}${CAP_LEFT}${RESET}"
-            printf "${_c5_bg}${BOLD}${FG_ACTIVITY_TEXT} %s ${RESET}" "$chip5_content"
-            printf "${_c5_fg}${CAP_RIGHT}${RESET}"
         fi
     fi
 fi
 
-# CHIP 6: config counts — MCP / Hooks / Skills (width >= 120)
-if [ "$term_width" -ge 120 ] 2>/dev/null; then
-    _cc=$(_fetch_config_counts)
-    if [ -n "$_cc" ] && [ "$_cc" != "null" ]; then
-        IFS=$'\t' read -r _mcp _hooks _skills <<< \
-            "$(echo "$_cc" | jq -r '[(.mcp//0|tostring), (.hooks//0|tostring), (.skills//0|tostring)] | join("\t")' 2>/dev/null)"
-        chip6_content="${ICON_SERVER} MCP: ${_mcp} | Hooks: ${_hooks} | Skills: ${_skills}"
-        printf "%s" "$CHIP_SEP"
-        printf "${FG_CONFIG}${CAP_LEFT}${RESET}"
-        printf "${BG_CONFIG}${BOLD}${FG_CONFIG_TEXT} %s ${RESET}" "$chip6_content"
-        printf "${FG_CONFIG}${CAP_RIGHT}${RESET}"
-    fi
+# Chip 6 content
+chip6_content=""
+_cc=$(_fetch_config_counts)
+if [ -n "$_cc" ] && [ "$_cc" != "null" ]; then
+    IFS=$'\t' read -r _mcp _hooks _skills <<< \
+        "$(echo "$_cc" | jq -r '[(.mcp//0|tostring), (.hooks//0|tostring), (.skills//0|tostring)] | join("\t")' 2>/dev/null)"
+    chip6_content="${ICON_SERVER} MCP: ${_mcp} | Hooks: ${_hooks} | Skills: ${_skills}"
+fi
+
+# CHIP 4: render inline when wide enough
+if [ -n "$chip4_content" ] && [ "$term_width" -ge 100 ] 2>/dev/null; then
+    printf "%s" "$CHIP_SEP"
+    printf "${FG_STATS}${CAP_LEFT}${RESET}"
+    printf "${BG_STATS}${BOLD}${FG_STATS_TEXT} %s ${RESET}" "$chip4_content"
+    printf "${FG_STATS}${CAP_RIGHT}${RESET}"
+fi
+
+# CHIP 5: render inline when wide enough
+if [ -n "$chip5_content" ] && [ "$term_width" -ge 100 ] 2>/dev/null; then
+    printf "%s" "$CHIP_SEP"
+    printf "${_c5_fg}${CAP_LEFT}${RESET}"
+    printf "${_c5_bg}${BOLD}${FG_ACTIVITY_TEXT} %s ${RESET}" "$chip5_content"
+    printf "${_c5_fg}${CAP_RIGHT}${RESET}"
+fi
+
+# CHIP 6: render inline when wide enough
+if [ -n "$chip6_content" ] && [ "$term_width" -ge 120 ] 2>/dev/null; then
+    printf "%s" "$CHIP_SEP"
+    printf "${FG_CONFIG}${CAP_LEFT}${RESET}"
+    printf "${BG_CONFIG}${BOLD}${FG_CONFIG_TEXT} %s ${RESET}" "$chip6_content"
+    printf "${FG_CONFIG}${CAP_RIGHT}${RESET}"
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -780,6 +793,36 @@ if [ "$term_width" -ge 60 ] 2>/dev/null; then
             fi
         fi
     fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════
+# ROW 3: overflow chips — visible on all terminal widths
+# Chips that didn't fit in Row 1 are placed here, on the same line.
+# ═══════════════════════════════════════════════════════════════════
+_row3_open=0   # 1 after the row's leading newline is printed
+
+if [ -n "$chip4_content" ] && [ "$term_width" -lt 100 ] 2>/dev/null; then
+    printf "\n"; _row3_open=1
+    printf "%s" "$CHIP_SEP"
+    printf "${FG_STATS}${CAP_LEFT}${RESET}"
+    printf "${BG_STATS}${BOLD}${FG_STATS_TEXT} %s ${RESET}" "$chip4_content"
+    printf "${FG_STATS}${CAP_RIGHT}${RESET}"
+fi
+
+if [ -n "$chip5_content" ] && [ "$term_width" -lt 100 ] 2>/dev/null; then
+    [ "$_row3_open" -eq 0 ] && printf "\n" && _row3_open=1
+    printf "%s" "$CHIP_SEP"
+    printf "${_c5_fg}${CAP_LEFT}${RESET}"
+    printf "${_c5_bg}${BOLD}${FG_ACTIVITY_TEXT} %s ${RESET}" "$chip5_content"
+    printf "${_c5_fg}${CAP_RIGHT}${RESET}"
+fi
+
+if [ -n "$chip6_content" ] && [ "$term_width" -lt 120 ] 2>/dev/null; then
+    [ "$_row3_open" -eq 0 ] && printf "\n" && _row3_open=1
+    printf "%s" "$CHIP_SEP"
+    printf "${FG_CONFIG}${CAP_LEFT}${RESET}"
+    printf "${BG_CONFIG}${BOLD}${FG_CONFIG_TEXT} %s ${RESET}" "$chip6_content"
+    printf "${FG_CONFIG}${CAP_RIGHT}${RESET}"
 fi
 
 printf "\n"
