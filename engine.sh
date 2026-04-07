@@ -22,11 +22,19 @@ if [ ! -f "$THEME_FILE" ]; then
     exit 1
 fi
 
-# Set STATS chip fallback defaults before sourcing theme
-# (so themes that don't define them still render Chip 4)
+# Set chip fallback defaults before sourcing theme
+# (so themes that don't define them still render correctly)
 FG_STATS="\033[38;2;46;125;50m"
 BG_STATS="\033[48;2;46;125;50m"
 FG_STATS_TEXT="\033[38;2;255;255;255m"
+# Chip 5 — Activity (blue)
+FG_ACTIVITY="\033[38;2;30;100;160m"
+BG_ACTIVITY="\033[48;2;30;100;160m"
+FG_ACTIVITY_TEXT="\033[38;2;255;255;255m"
+# Chip 6 — Config (slate)
+FG_CONFIG="\033[38;2;70;70;100m"
+BG_CONFIG="\033[48;2;70;70;100m"
+FG_CONFIG_TEXT="\033[38;2;200;200;220m"
 
 source "$THEME_FILE"
 
@@ -50,6 +58,10 @@ if [ "${CHIPS_ASCII:-0}" = "1" ]; then
     ICON_CHART="="
     ICON_BOLT="!"
     ICON_WARN="!!"
+    ICON_TOOL="~"
+    ICON_RUNNING=">"
+    ICON_DONE="."
+    ICON_SERVER="#"
     CTX_FILL="#"
     CTX_EMPTY="-"
 else
@@ -66,6 +78,10 @@ else
     ICON_CHART=$(printf '\xef\x82\x80')         # U+F080  fa-bar-chart
     ICON_BOLT=$(printf '\xef\x83\xa7')          # U+F0E7  fa-bolt
     ICON_WARN="!!"
+    ICON_TOOL=$(printf '\xef\x83\x82')          # U+F0C2  wrench
+    ICON_RUNNING=$(printf '\xee\x97\xb3')       # U+E5F3  nf-md-loading
+    ICON_DONE=$(printf '\xef\x80\x9c')          # U+F01C  check-circle
+    ICON_SERVER=$(printf '\xef\x83\xb8')        # U+F0F8  server
     CTX_FILL="■"
     CTX_EMPTY="□"
 fi
@@ -226,6 +242,114 @@ fetch_usage_data() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
+# [F2] TRANSCRIPT ACTIVITY — Chip 5 data source
+# ═══════════════════════════════════════════════════════════════════
+# Reads the last TRANSCRIPT_TAIL_LINES lines of the CC session transcript
+# (NDJSON at transcript_path). Returns JSON with running/last tool and count.
+# Caches result by transcript file mtime — invalidates on every new tool call.
+TRANSCRIPT_TAIL_LINES="${TRANSCRIPT_TAIL_LINES:-200}"
+TRANSCRIPT_CACHE="/tmp/claude/transcript-cache.json"
+
+_fetch_transcript_activity() {
+    local path="$1"
+    [ -z "$path" ] || [ ! -f "$path" ] && return
+
+    local path_mtime
+    path_mtime=$(_file_mtime "$path")
+
+    if [ -f "$TRANSCRIPT_CACHE" ]; then
+        local cached_mtime
+        cached_mtime=$(jq -r '.transcript_mtime // 0' "$TRANSCRIPT_CACHE" 2>/dev/null)
+        if [ "$cached_mtime" = "$path_mtime" ]; then
+            cat "$TRANSCRIPT_CACHE"
+            return
+        fi
+    fi
+
+    local result
+    result=$(tail -n "$TRANSCRIPT_TAIL_LINES" "$path" | jq -s '
+        (map(select(.type=="assistant") |
+             (.message.content | arrays | .[]) |
+             select(.type=="tool_use") |
+             {id, name})) as $uses |
+        (map(select(.type=="user") |
+             (.message.content | arrays | .[]) |
+             select(.type=="tool_result") |
+             {id: .tool_use_id})) as $results |
+        {
+            running: ($uses | map(
+                select(.id as $uid |
+                    ($results | map(.id) | index($uid)) == null)
+            ) | last | .name // ""),
+            last_tool: ($uses | last | .name // ""),
+            tool_count: ($uses | length)
+        }
+    ' 2>/dev/null)
+
+    if [ -n "$result" ] && [ "$result" != "null" ]; then
+        echo "$result" | jq --argjson m "$path_mtime" '. + {transcript_mtime: $m}' \
+            > "$TRANSCRIPT_CACHE" 2>/dev/null
+        echo "$result"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# [F3] CONFIG COUNTS — Chip 6 data source
+# ═══════════════════════════════════════════════════════════════════
+# Reads MCP server count, hooks count, and skills count from settings files.
+# Caches result by global settings.json mtime — cheap to invalidate.
+CONFIG_CACHE="/tmp/claude/config-counts.json"
+
+_fetch_config_counts() {
+    local settings="${HOME}/.claude/settings.json"
+    local settings_mtime
+    settings_mtime=$(_file_mtime "$settings" 2>/dev/null || echo 0)
+
+    if [ -f "$CONFIG_CACHE" ]; then
+        local cached_mtime
+        cached_mtime=$(jq -r '.settings_mtime // 0' "$CONFIG_CACHE" 2>/dev/null)
+        if [ "$cached_mtime" = "$settings_mtime" ]; then
+            cat "$CONFIG_CACHE"
+            return
+        fi
+    fi
+
+    # MCP count: global + project settings + .mcp.json, deduplicated
+    local mcp_count=0
+    local mcp_args=()
+    [ -f "$settings" ] && mcp_args+=("$settings")
+    [ -f ".claude/settings.json" ] && mcp_args+=(".claude/settings.json")
+    [ -f ".mcp.json" ] && mcp_args+=(".mcp.json")
+    if [ "${#mcp_args[@]}" -gt 0 ]; then
+        mcp_count=$(jq -s '
+            [.[].mcpServers? // {} |
+             to_entries[] |
+             select(.value.disabled != true) |
+             .key] | unique | length
+        ' "${mcp_args[@]}" 2>/dev/null || echo 0)
+    fi
+
+    # Hooks count
+    local hooks_count=0
+    [ -f "$settings" ] && \
+        hooks_count=$(jq -r '(.hooks // {} | keys | length)' "$settings" 2>/dev/null || echo 0)
+
+    # Skills count
+    local skills_count=0
+    skills_count=$(ls "${HOME}/.claude/skills/" 2>/dev/null | wc -l | tr -d ' ')
+
+    local result
+    result=$(jq -n \
+        --argjson mcp   "${mcp_count:-0}" \
+        --argjson hooks "${hooks_count:-0}" \
+        --argjson skills "${skills_count:-0}" \
+        --argjson mtime "$settings_mtime" \
+        '{mcp:$mcp, hooks:$hooks, skills:$skills, settings_mtime:$mtime}')
+    echo "$result" > "$CONFIG_CACHE" 2>/dev/null
+    echo "$result"
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # [F] DATE HELPERS
 # ═══════════════════════════════════════════════════════════════════
 iso_to_epoch() {
@@ -295,8 +419,11 @@ build_usage_bar() {
 # [H] DATA EXTRACTION — single-pass jq
 # ═══════════════════════════════════════════════════════════════════
 # All input fields extracted in one jq subprocess call (tab-delimited).
+# Single-pass extraction of all stdin fields (one jq subprocess)
 IFS=$'\t' read -r project_dir session_id model_raw \
     input_tokens output_tokens cache_read cache_write context_size api_ms \
+    transcript_path \
+    sl_fh_pct sl_fh_reset sl_sd_pct sl_sd_reset \
     <<< "$(echo "$input" | jq -r '[
         (.workspace.project_dir // .workspace.current_dir // "."),
         (.session_id // "unknown"),
@@ -308,29 +435,17 @@ IFS=$'\t' read -r project_dir session_id model_raw \
         (.context_window.current_usage.cache_read_input_tokens // 0 | tostring),
         (.context_window.current_usage.cache_creation_input_tokens // 0 | tostring),
         (.context_window.context_window_size // 0 | tostring),
-        (.cost.total_api_duration_ms // 0 | tostring)
+        (.cost.total_api_duration_ms // 0 | tostring),
+        (.transcript_path // ""),
+        (if .rate_limits then (.rate_limits.five_hour.used_percentage  // -1 | tostring) else "-1" end),
+        (if .rate_limits then (.rate_limits.five_hour.resets_at  // "" | tostring) else "" end),
+        (if .rate_limits then (.rate_limits.seven_day.used_percentage // -1 | tostring) else "-1" end),
+        (if .rate_limits then (.rate_limits.seven_day.resets_at // "" | tostring) else "" end)
     ] | join("\t")' 2>/dev/null)"
 
-# stdin rate_limits (CC v2.1.80+): direct usage data without OAuth polling
+# stdin rate_limits present when five_hour pct is not -1
 stdin_has_rate_limits=0
-sl_fh_pct=-1; sl_fh_reset=""; sl_sd_pct=-1; sl_sd_reset=""
-_rl_raw=$(echo "$input" | jq -r '
-    if .rate_limits then
-        [
-            (.rate_limits.five_hour.used_percentage // -1 | tostring),
-            (.rate_limits.five_hour.resets_at // "" | tostring),
-            (.rate_limits.seven_day.used_percentage // -1 | tostring),
-            (.rate_limits.seven_day.resets_at // "" | tostring)
-        ] | join("\t")
-    else "ABSENT" end
-' 2>/dev/null)
-if [ "$_rl_raw" != "ABSENT" ] && [ -n "$_rl_raw" ]; then
-    stdin_has_rate_limits=1
-    IFS=$'\t' read -r sl_fh_pct sl_fh_reset sl_sd_pct sl_sd_reset <<< "$_rl_raw"
-fi
-
-# transcript_path: for Phase 3 agent/tool chip
-transcript_path=$(echo "$input" | jq -r '.transcript_path // ""' 2>/dev/null)
+[ "${sl_fh_pct:-"-1"}" != "-1" ] && stdin_has_rate_limits=1
 
 # ═══════════════════════════════════════════════════════════════════
 # [I] GIT DETECTION
@@ -473,8 +588,11 @@ DISCONNECTED=0
 [ "$context_size" -le 0 ] 2>/dev/null && DISCONNECTED=1
 
 # Progressive disclosure: hide chip 4 when all metrics are healthy
+# _quiet_usage_pct is populated from stdin rate_limits (free) or api_usage cache
 _quiet_usage_pct=0
-if [ -n "$api_usage" ]; then
+if [ "$stdin_has_rate_limits" -eq 1 ] && [ "${sl_fh_pct:-"-1"}" != "-1" ]; then
+    _quiet_usage_pct=$(awk "BEGIN {printf \"%.0f\", ${sl_fh_pct:-0}}")
+elif [ -n "$api_usage" ]; then
     _fh_util=$(echo "$api_usage" | jq -r '.five_hour.utilization // 0' 2>/dev/null)
     _quiet_usage_pct=$(awk "BEGIN {printf \"%.0f\", ${_fh_util:-0}}")
 fi
@@ -545,6 +663,42 @@ if [ "$term_width" -ge 100 ] 2>/dev/null && [ "$CHIPS_QUIET" -eq 0 ]; then
     printf "${FG_STATS}${CAP_LEFT}${RESET}"
     printf "${BG_STATS}${BOLD}${FG_STATS_TEXT} %s ${RESET}" "$chip4_content"
     printf "${FG_STATS}${CAP_RIGHT}${RESET}"
+fi
+
+# CHIP 5: tool activity — running tool or last tool + count (width >= 100)
+if [ "$term_width" -ge 100 ] 2>/dev/null && [ -n "$transcript_path" ]; then
+    _ta=$(_fetch_transcript_activity "$transcript_path")
+    if [ -n "$_ta" ] && [ "$_ta" != "null" ]; then
+        IFS=$'\t' read -r _running _last _count <<< \
+            "$(echo "$_ta" | jq -r '[.running//"", .last_tool//"", (.tool_count//0|tostring)] | join("\t")' 2>/dev/null)"
+        if [ -n "$_running" ]; then
+            chip5_content="${ICON_RUNNING} ${_running} …"
+            _c5_fg="$ALERT_FG_ORANGE"; _c5_bg="$ALERT_BG_ORANGE"
+        elif [ -n "$_last" ]; then
+            chip5_content="${ICON_DONE} ${_last} · ${_count}"
+            _c5_fg="$FG_ACTIVITY"; _c5_bg="$BG_ACTIVITY"
+        fi
+        if [ -n "${chip5_content:-}" ]; then
+            printf "%s" "$CHIP_SEP"
+            printf "${_c5_fg}${CAP_LEFT}${RESET}"
+            printf "${_c5_bg}${BOLD}${FG_ACTIVITY_TEXT} %s ${RESET}" "$chip5_content"
+            printf "${_c5_fg}${CAP_RIGHT}${RESET}"
+        fi
+    fi
+fi
+
+# CHIP 6: config counts — MCP / Hooks / Skills (width >= 120)
+if [ "$term_width" -ge 120 ] 2>/dev/null; then
+    _cc=$(_fetch_config_counts)
+    if [ -n "$_cc" ] && [ "$_cc" != "null" ]; then
+        IFS=$'\t' read -r _mcp _hooks _skills <<< \
+            "$(echo "$_cc" | jq -r '[(.mcp//0|tostring), (.hooks//0|tostring), (.skills//0|tostring)] | join("\t")' 2>/dev/null)"
+        chip6_content="${ICON_SERVER} MCP: ${_mcp} | Hooks: ${_hooks} | Skills: ${_skills}"
+        printf "%s" "$CHIP_SEP"
+        printf "${FG_CONFIG}${CAP_LEFT}${RESET}"
+        printf "${BG_CONFIG}${BOLD}${FG_CONFIG_TEXT} %s ${RESET}" "$chip6_content"
+        printf "${FG_CONFIG}${CAP_RIGHT}${RESET}"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════
