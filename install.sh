@@ -132,6 +132,14 @@ else
         > "$SETTINGS_FILE"
 fi
 
+# ── Install /cc-chips skill ──────────────────────────────────────
+SKILL_DIR="${HOME}/.claude/skills/cc-chips"
+if [ ! -d "$SKILL_DIR" ]; then
+    mkdir -p "$SKILL_DIR"
+fi
+cp "${INSTALL_DIR}/skills/cc-chips/SKILL.md" "${SKILL_DIR}/SKILL.md"
+echo "Installed /cc-chips skill to ${SKILL_DIR}"
+
 # ── Windows Git Bash path warning ────────────────────────────────
 if [ "$PLATFORM" = "gitbash" ]; then
     echo ""
@@ -151,6 +159,7 @@ echo "  Theme    : ${chosen_theme}"
 echo "  Settings : ${SETTINGS_FILE}"
 echo ""
 echo "Restart Claude Code to activate the status line."
+echo "  Skill    : /cc-chips  (change theme or mode anytime)"
 if [ "$chosen_theme" = "minimal" ]; then
     _yellow "  Minimal theme: no Nerd Font required — ASCII mode is active."
 else
