@@ -593,7 +593,22 @@ fi
 # ═══════════════════════════════════════════════════════════════════
 # [L] CHIP RENDERING & OUTPUT (responsive to terminal width)
 # ═══════════════════════════════════════════════════════════════════
-term_width=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+# Terminal width detection: try multiple sources since engine runs in a pipe
+# where $COLUMNS and tput may not reflect the actual pane width.
+# CC_CHIPS_COLS allows explicit override for split-terminal setups.
+_detect_term_width() {
+    [ -n "$CC_CHIPS_COLS" ] && echo "$CC_CHIPS_COLS" && return
+    [ -n "$COLUMNS" ] && [ "$COLUMNS" -gt 0 ] 2>/dev/null && echo "$COLUMNS" && return
+    local _w
+    _w=$(tput cols 2>/dev/null)
+    # tput returns 80 as default when no TTY; only trust non-default values
+    [ -n "$_w" ] && [ "$_w" -gt 0 ] 2>/dev/null && [ "$_w" != "80" ] && echo "$_w" && return
+    # Try reading from stderr (may still be attached to terminal)
+    _w=$(stty size 2>/dev/null </dev/stderr | awk '{print $2}')
+    [ -n "$_w" ] && [ "$_w" -gt 0 ] 2>/dev/null && echo "$_w" && return
+    echo 80
+}
+term_width=$(_detect_term_width)
 
 # ── Usage data (fetched early for DISCONNECTED + CHIPS_QUIET logic) ──
 api_usage=""
@@ -626,9 +641,12 @@ if [ "$api_sec" != "--" ]; then
     [ "$_q_slow" = "1" ] && CHIPS_QUIET=0  # slow API response always shows chip 4
 fi
 
-# Adaptive path: use leaf-only name when terminal is very narrow
-if [ "$term_width" -lt 60 ] 2>/dev/null; then
+# Adaptive path: shorten progressively as terminal narrows
+if [ "$term_width" -lt 50 ] 2>/dev/null; then
     display_path=$(basename "$short_path")
+elif [ "$term_width" -lt 70 ] 2>/dev/null; then
+    # Show last 2 path components (e.g. "projects/volla")
+    display_path=$(echo "$short_path" | awk -F/ '{if(NF>2) print $(NF-1)"/"$NF; else print $0}')
 else
     display_path="$short_path"
 fi
@@ -655,13 +673,20 @@ printf "${FG_LEFT}${CAP_RIGHT}${RESET}"
 # Pre-compute content always so Row 3 can pick it up at < 60 cols.
 chip2_content=""
 if [ -n "$git_branch" ]; then
-    chip2_content="${ICON_GITHUB} ${ICON_BRANCH} ${git_branch}${git_dirty}"
+    # Truncate long branch names to prevent overflow in narrow terminals
+    _branch_display="$git_branch"
+    if [ "$term_width" -lt 80 ] 2>/dev/null && [ "${#git_branch}" -gt 20 ]; then
+        _branch_display="${git_branch:0:18}.."
+    elif [ "$term_width" -lt 100 ] 2>/dev/null && [ "${#git_branch}" -gt 30 ]; then
+        _branch_display="${git_branch:0:28}.."
+    fi
+    chip2_content="${ICON_GITHUB} ${ICON_BRANCH} ${_branch_display}${git_dirty}"
     if [ -n "$git_wt_name" ]; then
         chip2_content="${chip2_content} ${ICON_WORKTREE} ${git_wt_name}(${git_wt_count})"
     fi
 fi
 
-if [ -n "$chip2_content" ] && [ "$term_width" -ge 60 ] 2>/dev/null; then
+if [ -n "$chip2_content" ] && [ "$term_width" -ge 70 ] 2>/dev/null; then
     printf "%s" "$CHIP_SEP"
     printf "${FG_MID}${CAP_LEFT}${RESET}"
     printf "${BG_MID}${BOLD}${FG_MID_TEXT} %s${FG_MID_TEXT} ${RESET}" "$chip2_content"
@@ -678,8 +703,10 @@ if [ "$DISCONNECTED" -eq 1 ]; then
 elif [ "$term_width" -lt 40 ] 2>/dev/null; then
     chip3_content="${model_display} ${context_pct}%"
 elif [ "$term_width" -lt 60 ] 2>/dev/null; then
+    chip3_content="${model_display} ${ctx_bar_r} ${context_pct}%"
+elif [ "$term_width" -lt 70 ] 2>/dev/null; then
     chip3_content="${ICON_BRAIN} ${model_display} ${ctx_bar_r} ${context_pct}%"
-elif [ "$term_width" -lt 80 ] 2>/dev/null; then
+elif [ "$term_width" -lt 90 ] 2>/dev/null; then
     chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}%"
 else
     chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_KEY} ${session_short}"
@@ -930,8 +957,8 @@ _row3_open_if_needed() {
     [ "$_row3_open" -eq 0 ] && printf "\n" && _row3_open=1
 }
 
-# Chip 2 overflow: git info when terminal is too narrow to show inline (< 60)
-if [ -n "$chip2_content" ] && [ "$term_width" -lt 60 ] 2>/dev/null; then
+# Chip 2 overflow: git info when terminal is too narrow to show inline (< 70)
+if [ -n "$chip2_content" ] && [ "$term_width" -lt 70 ] 2>/dev/null; then
     _row3_open_if_needed
     printf "%s" "$CHIP_SEP"
     printf "${FG_MID}${CAP_LEFT}${RESET}"
