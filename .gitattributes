@@ -1,0 +1,9 @@
+# Shell scripts must always use LF, even on Windows checkouts.
+# Without this, Git for Windows converts them to CRLF and bash fails with $'\r' errors.
+*.sh text eol=lf
+install.sh text eol=lf
+uninstall.sh text eol=lf
+engine.sh text eol=lf
+
+# PowerShell scripts use CRLF on Windows
+*.ps1 text eol=crlf
