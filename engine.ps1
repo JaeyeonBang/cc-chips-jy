@@ -196,6 +196,7 @@ function Get-ConfigCounts {
 # ── Git detection ─────────────────────────────────────────────────
 $gitBranch = ""
 $gitDirty  = ""
+$gitWtCount = 0
 try {
     $gb = & git -C "$projectDir" branch --show-current 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($gb)) {
@@ -205,6 +206,10 @@ try {
         & git -C "$projectDir" diff --cached --quiet 2>$null
         $diffCachedExit = $LASTEXITCODE
         if ($diffExit -ne 0 -or $diffCachedExit -ne 0) { $gitDirty = " *" }
+    }
+    $wtList = & git -C "$projectDir" worktree list 2>$null
+    if ($LASTEXITCODE -eq 0 -and $wtList) {
+        $gitWtCount = @($wtList).Count
     }
 } catch { }
 
@@ -216,7 +221,8 @@ $chipsQuiet = ($contextPct -lt 50) -and ($cachePct -ge 20) -and (-not $disconnec
 
 # ── Build output (ASCII, no ANSI) ────────────────────────────────
 $chip1 = "[# $shortPath]"
-$chip2 = if ($gitBranch) { " [> @ $gitBranch$gitDirty]" } else { "" }
+$wtSuffix = if ($gitWtCount -gt 1) { " wt:$gitWtCount" } else { "" }
+$chip2 = if ($gitBranch) { " [> @ $gitBranch$gitDirty$wtSuffix]" } else { "" }
 $chip3 = if ($disconnected) {
     " [DISC : [$ctxBar] $contextPct% $ $costDisplay]"
 } else {

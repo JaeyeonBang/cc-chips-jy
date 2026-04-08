@@ -71,6 +71,7 @@ if [ "${CHIPS_ASCII:-0}" = "1" ]; then
     ICON_RUNNING=">"
     ICON_DONE="."
     ICON_SERVER="#"
+    ICON_WORKTREE="wt"
     CTX_FILL="#"
     CTX_EMPTY="-"
 else
@@ -91,6 +92,7 @@ else
     ICON_RUNNING="▶"                              # U+25B6  standard unicode play
     ICON_DONE=$(printf '\xef\x80\x9c')          # U+F01C  check-circle
     ICON_SERVER=$(printf '\xef\x83\xb8')        # U+F0F8  server
+    ICON_WORKTREE=$(printf '\xee\xae\x85')     # U+EB85  nf-cod-list_tree
     CTX_FILL="■"
     CTX_EMPTY="□"
 fi
@@ -473,6 +475,7 @@ stdin_has_rate_limits=0
 # ═══════════════════════════════════════════════════════════════════
 git_branch=""
 git_dirty=""
+git_wt_count=0
 if [ -d "$project_dir/.git" ] || git -C "$project_dir" rev-parse --git-dir > /dev/null 2>&1; then
     git_branch=$(git -C "$project_dir" branch --show-current 2>/dev/null)
     if [ -n "$git_branch" ]; then
@@ -481,6 +484,7 @@ if [ -d "$project_dir/.git" ] || git -C "$project_dir" rev-parse --git-dir > /de
             git_dirty=" ≠"
         fi
     fi
+    git_wt_count=$(git -C "$project_dir" worktree list 2>/dev/null | wc -l | tr -d ' ')
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -639,7 +643,12 @@ printf "${FG_LEFT}${CAP_RIGHT}${RESET}"
 # CHIP 2: git info — inline when wide enough, overflow to Row 3 when narrow
 # Pre-compute content always so Row 3 can pick it up at < 60 cols.
 chip2_content=""
-[ -n "$git_branch" ] && chip2_content="${ICON_GITHUB} ${ICON_BRANCH} ${git_branch}${git_dirty}"
+if [ -n "$git_branch" ]; then
+    chip2_content="${ICON_GITHUB} ${ICON_BRANCH} ${git_branch}${git_dirty}"
+    if [ "${git_wt_count:-0}" -gt 1 ] 2>/dev/null; then
+        chip2_content="${chip2_content} ${ICON_WORKTREE} wt:${git_wt_count}"
+    fi
+fi
 
 if [ -n "$chip2_content" ] && [ "$term_width" -ge 60 ] 2>/dev/null; then
     printf "%s" "$CHIP_SEP"
