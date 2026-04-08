@@ -529,11 +529,22 @@ total_ctx=$(( input_tokens + cache_read + cache_write ))
 cache_pct=0
 [ "$total_ctx" -gt 0 ] && cache_pct=$(( cache_read * 100 / total_ctx ))
 
-# API response time
-api_sec="0.0"
-if [ "$api_ms" -gt 0 ] 2>/dev/null; then
-    api_sec=$(awk "BEGIN {printf \"%.1f\", $api_ms / 1000}")
+# Last API response time (delta between renders, not cumulative total)
+# cost.total_api_duration_ms is cumulative — we track the delta to get per-call time.
+API_TIME_CACHE="/tmp/claude/api-time-delta.json"
+_prev_api_ms=0; api_sec="--"
+if [ -f "$API_TIME_CACHE" ]; then
+    _prev_api_ms=$(jq -r '.api_ms // 0' "$API_TIME_CACHE" 2>/dev/null)
+    api_sec=$(jq -r '.last_sec // "--"' "$API_TIME_CACHE" 2>/dev/null)
 fi
+if [ "$api_ms" -gt "$_prev_api_ms" ] 2>/dev/null; then
+    _delta_ms=$(( api_ms - _prev_api_ms ))
+    if [ "$_delta_ms" -gt 0 ] && [ "$_delta_ms" -lt 300000 ]; then
+        api_sec=$(awk "BEGIN {printf \"%.1f\", $_delta_ms / 1000}")
+    fi
+fi
+jq -n --argjson ms "${api_ms:-0}" --arg ls "$api_sec" \
+    '{api_ms:$ms, last_sec:$ls}' > "$API_TIME_CACHE" 2>/dev/null
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -557,20 +568,11 @@ elif [ "$cache_pct" -lt 20 ];  then
     FG_STATS="$ALERT_FG_YELLOW"; BG_STATS="$ALERT_BG_YELLOW"
 fi
 
-# API response time: cap sentinel values
-# CC emits ~4096000ms (4096s) in cost.total_api_duration_ms on connection drop
-api_ms_capped=0
-if [ "$api_ms" -ge 60000 ] 2>/dev/null; then
-    api_ms_capped=1
-    api_sec="60+"
-fi
-
-# API warn prefix
+# API warn prefix (based on last response time delta)
 api_warn_prefix=""
-if [ "$api_ms_capped" -eq 1 ]; then
-    api_warn_prefix="DISC "
-elif [ "$api_ms" -ge 10000 ] 2>/dev/null; then
-    api_warn_prefix="${ICON_WARN} "
+if [ "$api_sec" != "--" ]; then
+    _is_slow=$(awk "BEGIN {print ($api_sec >= 10.0) ? 1 : 0}" 2>/dev/null)
+    [ "$_is_slow" = "1" ] && api_warn_prefix="${ICON_WARN} "
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -604,7 +606,10 @@ if [ "$context_pct" -lt 50 ] && [ "$cache_pct" -ge 20 ] && \
     CHIPS_QUIET=1
 fi
 [ "$DISCONNECTED" -eq 1 ] && CHIPS_QUIET=0    # DISCONNECTED always shows chip 4
-[ "${api_ms_capped:-0}" -eq 1 ] && CHIPS_QUIET=0  # extreme API latency always shows chip 4
+if [ "$api_sec" != "--" ]; then
+    _q_slow=$(awk "BEGIN {print ($api_sec >= 10.0) ? 1 : 0}" 2>/dev/null)
+    [ "$_q_slow" = "1" ] && CHIPS_QUIET=0  # slow API response always shows chip 4
+fi
 
 # Adaptive path: use leaf-only name when terminal is very narrow
 if [ "$term_width" -lt 60 ] 2>/dev/null; then
@@ -649,7 +654,7 @@ printf "%s" "$CHIP_SEP"
 if [ "$DISCONNECTED" -eq 1 ]; then
     FG_RIGHT="$ALERT_FG_RED"
     BG_RIGHT="$ALERT_BG_RED"
-    chip3_content="DISC ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}%"
+    chip3_content="OFFLINE ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}%"
 elif [ "$term_width" -lt 40 ] 2>/dev/null; then
     chip3_content="${model_display} ${context_pct}%"
 elif [ "$term_width" -lt 60 ] 2>/dev/null; then
