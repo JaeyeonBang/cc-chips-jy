@@ -72,6 +72,23 @@ chmod +x "${INSTALL_DIR}/engine.sh" \
          "${INSTALL_DIR}/install.sh" \
          "${INSTALL_DIR}/uninstall.sh"
 
+# ── Billing mode selection ────────────────────────────────────────
+echo ""
+_bold "How do you use Claude?"
+echo "  a) API based   — pay-per-use, usage tracked by cost/tokens"
+echo "  b) Subscription — Pro/Max plan with rate limits"
+echo ""
+read -r -p "Choose [a/b, default: b]: " billing_choice
+billing_choice="${billing_choice:-b}"
+
+case "$billing_choice" in
+    a|A) chosen_billing="api" ;;
+    b|B) chosen_billing="subscription" ;;
+    *)   _yellow "Unknown choice '${billing_choice}', defaulting to 'subscription'."
+         chosen_billing="subscription" ;;
+esac
+echo "Billing mode: ${chosen_billing}"
+
 # ── Theme selection ───────────────────────────────────────────────
 echo ""
 echo "Available themes:"
@@ -107,6 +124,12 @@ if [ -n "$RC_FILE" ] && [ -f "$RC_FILE" ]; then
         echo "Added CC_CHIPS_THEME=${chosen_theme} to ${RC_FILE}"
     else
         _yellow "CC_CHIPS_THEME already set in ${RC_FILE} — not overwriting."
+    fi
+    if ! grep -q "CC_CHIPS_BILLING" "$RC_FILE" 2>/dev/null; then
+        echo "export CC_CHIPS_BILLING=${chosen_billing}" >> "$RC_FILE"
+        echo "Added CC_CHIPS_BILLING=${chosen_billing} to ${RC_FILE}"
+    else
+        _yellow "CC_CHIPS_BILLING already set in ${RC_FILE} — not overwriting."
     fi
 fi
 

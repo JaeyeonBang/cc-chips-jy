@@ -11,6 +11,15 @@
 # [A] INIT & THEME LOAD
 # ═══════════════════════════════════════════════════════════════════
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Read CC_CHIPS_THEME: env var first, then fall back to RC file
+# (covers case where Claude Code was started before the var was exported)
+if [ -z "$CC_CHIPS_THEME" ]; then
+    _rc="$HOME/.bashrc"
+    [ -f "$HOME/.zshrc" ] && [ "${SHELL##*/}" = "zsh" ] && _rc="$HOME/.zshrc"
+    _theme_from_rc=$(grep -oP '(?<=CC_CHIPS_THEME=)[^\s"]+' "$_rc" 2>/dev/null)
+    [ -n "$_theme_from_rc" ] && CC_CHIPS_THEME="$_theme_from_rc"
+fi
 THEME="${CC_CHIPS_THEME:-claude}"
 # Guard against path traversal via CC_CHIPS_THEME (allow only alphanumeric + hyphen/underscore)
 THEME="${THEME//[^a-zA-Z0-9_-]/}"
@@ -484,8 +493,9 @@ short_path=$(echo "$project_dir" | sed "s|$HOME|~|")
 # Session short ID (first 8 chars)
 session_short="${session_id:0:8}"
 
-# Model display name normalization
-case "$model_raw" in
+# Model display name normalization (case-insensitive via lowercase conversion)
+model_lower=$(echo "$model_raw" | tr '[:upper:]' '[:lower:]')
+case "$model_lower" in
     *opus*4.6*|*opus-4-6*)     model_display="Opus 4.6" ;;
     *opus*4.5*|*opus-4-5*)     model_display="Opus 4.5" ;;
     *opus*4*|*opus-4*)         model_display="Opus 4"   ;;
@@ -525,26 +535,6 @@ if [ "$api_ms" -gt 0 ] 2>/dev/null; then
     api_sec=$(awk "BEGIN {printf \"%.1f\", $api_ms / 1000}")
 fi
 
-# Cost (model-based pricing per 1M tokens, in cents)
-#   Opus 4.6:   $5 in, $25 out, $0.50 cache read (0.1x), $6.25 cache write (1.25x)
-#   Sonnet 4.6: $3 in, $15 out, $0.30 cache read (0.1x), $3.75 cache write (1.25x)
-#   Haiku 4.5:  $1 in,  $5 out, $0.10 cache read (0.1x), $1.25 cache write (1.25x)
-case "$model_display" in
-    Sonnet*)
-        price_input=300;  price_output=1500; price_cache_read=30;  price_cache_write=375  ;;
-    Haiku*)
-        price_input=100;  price_output=500;  price_cache_read=10;  price_cache_write=125  ;;
-    *)
-        price_input=500;  price_output=2500; price_cache_read=50;  price_cache_write=625  ;;
-esac
-total_cents=$(( (input_tokens * price_input + output_tokens * price_output +
-                 cache_read * price_cache_read + cache_write * price_cache_write) / 1000000 ))
-
-if   [ $total_cents -eq 0 ];   then cost_display="\$0"
-elif [ $total_cents -lt 100 ]; then cost_display="\$0.$(printf '%02d' $total_cents)"
-else
-    cost_display="\$$(( total_cents / 100 )).$(printf '%02d' $(( total_cents % 100 )))"
-fi
 
 # ═══════════════════════════════════════════════════════════════════
 # [K] DYNAMIC COLOR ALERTS
@@ -659,15 +649,15 @@ printf "%s" "$CHIP_SEP"
 if [ "$DISCONNECTED" -eq 1 ]; then
     FG_RIGHT="$ALERT_FG_RED"
     BG_RIGHT="$ALERT_BG_RED"
-    chip3_content="DISC ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
+    chip3_content="DISC ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}%"
 elif [ "$term_width" -lt 40 ] 2>/dev/null; then
     chip3_content="${model_display} ${context_pct}%"
 elif [ "$term_width" -lt 60 ] 2>/dev/null; then
-    chip3_content="${ICON_BRAIN} ${model_display} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
+    chip3_content="${ICON_BRAIN} ${model_display} ${ctx_bar_r} ${context_pct}%"
 elif [ "$term_width" -lt 80 ] 2>/dev/null; then
-    chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display}"
+    chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}%"
 else
-    chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_DOLLAR} ${cost_display} ${ICON_KEY} ${session_short}"
+    chip3_content="${ICON_BRAIN} ${model_display} ${ICON_MONITOR} ${ctx_bar_r} ${context_pct}% ${ICON_KEY} ${session_short}"
 fi
 printf "${FG_RIGHT}${CAP_LEFT}${RESET}"
 printf "${BG_RIGHT}${BOLD}${FG_RIGHT_TEXT} %s ${RESET}" "$chip3_content"
@@ -732,8 +722,10 @@ if [ -n "$chip6_content" ] && [ "$term_width" -ge 120 ] 2>/dev/null; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-# ROW 2: USAGE BARS (5h / weekly / sonnet / extra) — responsive
+# ROW 2: USAGE — subscription (rate limits) or API (ccusage monthly)
 # ═══════════════════════════════════════════════════════════════════
+BILLING_MODE="${CC_CHIPS_BILLING:-subscription}"
+
 render_usage_row() {
     local label="$1" pct="$2" reset_time="$3"
     local width=10
@@ -742,7 +734,6 @@ render_usage_row() {
     local usage_bar
     usage_bar=$(build_usage_bar "$pct" "$width")
     if [ "$term_width" -lt 60 ] 2>/dev/null; then
-        # Very narrow: compact label (4 chars) + bar + pct
         local short_label="${label:0:4}"
         printf "\n${COLOR_WHITE}${BOLD}%-4s${RESET} " "$short_label"
     else
@@ -756,10 +747,107 @@ render_usage_row() {
     fi
 }
 
-# Row 2: use stdin rate_limits when available (CC v2.1.80+), else OAuth cache
-# api_usage already fetched above (before chip rendering)
-# Always rendered — width gates removed so all usage data is visible on any terminal size.
-if true; then
+# ── API mode: ccusage monthly with cache ─────────────────────────
+CCUSAGE_CACHE="/tmp/claude/ccusage-monthly-cache.json"
+CCUSAGE_CACHE_MAX_AGE=300  # refresh every 5 minutes
+
+_format_cost() {
+    local cents="$1"
+    if [ "$cents" -le 0 ] 2>/dev/null; then echo "\$0.00"
+    elif [ "$cents" -lt 100 ]; then echo "\$0.$(printf '%02d' "$cents")"
+    else echo "\$$(( cents / 100 )).$(printf '%02d' $(( cents % 100 )))"
+    fi
+}
+
+_fetch_ccusage_monthly() {
+    mkdir -p /tmp/claude 2>/dev/null
+    if [ -f "$CCUSAGE_CACHE" ]; then
+        local cache_age now cache_mtime
+        cache_mtime=$(_file_mtime "$CCUSAGE_CACHE")
+        now=$(date +%s)
+        cache_age=$(( now - cache_mtime ))
+        if [ "$cache_age" -lt "$CCUSAGE_CACHE_MAX_AGE" ]; then
+            cat "$CCUSAGE_CACHE"
+            return
+        fi
+    fi
+    # Run ccusage in background if cache exists but stale
+    if [ -f "$CCUSAGE_CACHE" ]; then
+        (npx --yes ccusage monthly --json --offline 2>/dev/null > "${CCUSAGE_CACHE}.tmp" \
+            && mv -f "${CCUSAGE_CACHE}.tmp" "$CCUSAGE_CACHE") &
+        disown 2>/dev/null
+        cat "$CCUSAGE_CACHE"
+        return
+    fi
+    # First run: synchronous fetch (max 10s)
+    local result
+    result=$(timeout 10 npx --yes ccusage monthly --json --offline 2>/dev/null)
+    if [ -n "$result" ] && echo "$result" | jq -e '.monthly' >/dev/null 2>&1; then
+        echo "$result" > "$CCUSAGE_CACHE"
+        echo "$result"
+    fi
+}
+
+render_api_usage() {
+    local ccdata
+    ccdata=$(_fetch_ccusage_monthly)
+    [ -z "$ccdata" ] && return
+
+    local COLOR_CYAN="\033[38;2;0;200;200m"
+    local COLOR_DIM="\033[2m"
+
+    # Parse current month entry (last 1)
+    local months_json
+    months_json=$(echo "$ccdata" | jq -c '[.monthly[] | {
+        month: .month,
+        cost: (.totalCost * 100 | floor),
+        tokens: .totalTokens,
+        models: (.modelsUsed | join(", "))
+    }] | .[-1:]' 2>/dev/null)
+
+    [ -z "$months_json" ] || [ "$months_json" = "null" ] || [ "$months_json" = "[]" ] && return
+
+    local current_month
+    current_month=$(echo "$months_json" | jq -r '.[0].month // ""' 2>/dev/null)
+
+    # Header with current month
+    printf "\n${COLOR_CYAN}${BOLD}API Usage — ${current_month}${RESET}"
+
+    # Current month
+    echo "$months_json" | jq -c '.[]' 2>/dev/null | while IFS= read -r entry; do
+        local month cost_cents tokens models
+        month=$(echo "$entry" | jq -r '.month')
+        cost_cents=$(echo "$entry" | jq -r '.cost')
+        tokens=$(echo "$entry" | jq -r '.tokens')
+        models=$(echo "$entry" | jq -r '.models')
+
+        # Format tokens (K/M)
+        local tokens_display
+        if [ "$tokens" -ge 1000000 ] 2>/dev/null; then
+            tokens_display="$(awk "BEGIN {printf \"%.1f\", $tokens / 1000000}")M"
+        elif [ "$tokens" -ge 1000 ] 2>/dev/null; then
+            tokens_display="$(awk "BEGIN {printf \"%.0f\", $tokens / 1000}")K"
+        else
+            tokens_display="${tokens}"
+        fi
+
+        local cost_display
+        cost_display=$(_format_cost "$cost_cents")
+
+        if [ "$term_width" -ge 80 ] 2>/dev/null; then
+            printf "\n${COLOR_WHITE}${BOLD} %-8s${RESET} ${COLOR_CYAN}%s${RESET} ${COLOR_DIM}|${RESET} ${COLOR_WHITE}%s tokens${RESET} ${COLOR_DIM}|${RESET} ${COLOR_WHITE}%s${RESET}" \
+                "$month" "$cost_display" "$tokens_display" "$models"
+        else
+            printf "\n${COLOR_WHITE}${BOLD} %-8s${RESET} ${COLOR_CYAN}%s${RESET} ${COLOR_WHITE}%s tok${RESET}" \
+                "$month" "$cost_display" "$tokens_display"
+        fi
+    done
+}
+
+if [ "$BILLING_MODE" = "api" ]; then
+    render_api_usage
+else
+    # Subscription mode: rate limit bars
     if [ "$stdin_has_rate_limits" -eq 1 ]; then
         if [ "${sl_fh_pct}" != "-1" ] && [ -n "$sl_fh_pct" ]; then
             five_hour_pct=$(awk "BEGIN {printf \"%.0f\", $sl_fh_pct}")
@@ -788,13 +876,11 @@ if true; then
             render_usage_row "Current:" "$five_hour_pct" "$(format_reset_time "$fh_reset")"
             render_usage_row "Weekly:"  "$seven_day_pct" "$(format_reset_time "$sd_reset")"
 
-            # Sonnet-only weekly usage (only when field exists)
             if [ "$ss_util" != "-1" ] && [ -n "$ss_util" ]; then
                 sonnet_pct=$(awk "BEGIN {printf \"%.0f\", $ss_util}")
                 render_usage_row "Sonnet:" "$sonnet_pct" "$(format_reset_time "$ss_reset")"
             fi
 
-            # Extra usage (add-on) indicator
             if [ "$ex_enabled" = "true" ]; then
                 if [ "$ex_util" != "-1" ] && [ -n "$ex_util" ]; then
                     extra_pct=$(awk "BEGIN {printf \"%.0f\", $ex_util}")

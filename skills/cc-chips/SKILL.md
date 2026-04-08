@@ -12,7 +12,7 @@ You are a configuration assistant for the CC CHIPS-JY statusline.
 The user may invoke this skill with arguments like:
 - `/cc-chips` — show current status and menu
 - `/cc-chips theme <name>` — switch theme
-- `/cc-chips mode <subscription|api>` — switch billing mode
+- `/cc-chips mode <subscription|api>` — switch billing mode (a=api, b=subscription)
 - `/cc-chips status` — show current config
 - `/cc-chips update` — pull latest from git
 
@@ -54,12 +54,12 @@ Show current config and a menu:
 ```
 CC CHIPS-JY — current config
   Theme   : <CURRENT_THEME>  (claude | cool | retro | cyber | minimal)
-  Mode    : <CURRENT_MODE>   (auto | subscription | api)
+  Mode    : <CURRENT_MODE>   (subscription | api)
   Install : <INSTALL_DIR>
 
 Commands:
   /cc-chips theme <name>          — switch theme
-  /cc-chips mode <subscription|api|auto>  — switch billing mode
+  /cc-chips mode <subscription|api>  — switch billing mode
   /cc-chips update                — pull latest from git
 ```
 
@@ -71,9 +71,8 @@ Explain what each theme looks like (one line each):
 - minimal — ASCII only, no Nerd Font required
 
 Explain what each mode does:
-- auto — detects OAuth token; shows usage bars if subscription found, falls back gracefully otherwise
-- subscription — forces OAuth usage bar display (Pro/Max plans)
-- api — skips OAuth entirely; shows a plain "API mode" label in Row 3 (ccusage integration coming)
+- subscription — shows OAuth rate-limit bars (Pro/Max plans, default)
+- api — shows monthly cost/token usage via ccusage (pay-per-use API users)
 
 ### action = theme <name>
 
@@ -102,7 +101,7 @@ grep "CC_CHIPS_THEME" "$RC_FILE"
 
 ### action = mode <subscription|api|auto>
 
-Valid values: subscription, api, auto
+Valid values: subscription, api
 
 1. Validate the value. If invalid, list valid options and stop.
 2. Run:
@@ -125,7 +124,7 @@ grep "CC_CHIPS_BILLING" "$RC_FILE"
 3. Explain what the mode does (see mode descriptions above).
 4. Tell user: "Mode set to `<value>`. Run `source <RC_FILE>` then restart Claude Code to apply."
 
-**Note for api mode**: engine.sh does not yet render a ccusage row — it will silently skip Row 3 until that feature ships. The mode var is being set now so it's ready when the engine update lands.
+**Note for api mode**: requires `npx ccusage` (auto-installed). Shows monthly cost and token usage from local Claude Code session logs.
 
 ### action = update
 
