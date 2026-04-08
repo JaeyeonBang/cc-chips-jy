@@ -196,6 +196,7 @@ function Get-ConfigCounts {
 # ── Git detection ─────────────────────────────────────────────────
 $gitBranch = ""
 $gitDirty  = ""
+$gitWtName = ""
 $gitWtCount = 0
 try {
     $gb = & git -C "$projectDir" branch --show-current 2>$null
@@ -210,6 +211,15 @@ try {
     $wtList = & git -C "$projectDir" worktree list 2>$null
     if ($LASTEXITCODE -eq 0 -and $wtList) {
         $gitWtCount = @($wtList).Count
+        if ($gitWtCount -gt 1) {
+            $wtRoot = (& git -C "$projectDir" rev-parse --show-toplevel 2>$null).Trim()
+            $mainRoot = ($wtList[0] -split '\s+')[0]
+            if ($wtRoot -ne $mainRoot) {
+                $gitWtName = Split-Path $wtRoot -Leaf
+            } else {
+                $gitWtName = "main"
+            }
+        }
     }
 } catch { }
 
@@ -221,7 +231,7 @@ $chipsQuiet = ($contextPct -lt 50) -and ($cachePct -ge 20) -and (-not $disconnec
 
 # ── Build output (ASCII, no ANSI) ────────────────────────────────
 $chip1 = "[# $shortPath]"
-$wtSuffix = if ($gitWtCount -gt 1) { " wt:$gitWtCount" } else { "" }
+$wtSuffix = if ($gitWtName) { " wt:$gitWtName($gitWtCount)" } else { "" }
 $chip2 = if ($gitBranch) { " [> @ $gitBranch$gitDirty$wtSuffix]" } else { "" }
 $chip3 = if ($disconnected) {
     " [DISC : [$ctxBar] $contextPct% $ $costDisplay]"

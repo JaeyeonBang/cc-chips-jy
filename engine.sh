@@ -475,6 +475,7 @@ stdin_has_rate_limits=0
 # ═══════════════════════════════════════════════════════════════════
 git_branch=""
 git_dirty=""
+git_wt_name=""
 git_wt_count=0
 if [ -d "$project_dir/.git" ] || git -C "$project_dir" rev-parse --git-dir > /dev/null 2>&1; then
     git_branch=$(git -C "$project_dir" branch --show-current 2>/dev/null)
@@ -484,7 +485,17 @@ if [ -d "$project_dir/.git" ] || git -C "$project_dir" rev-parse --git-dir > /de
             git_dirty=" ≠"
         fi
     fi
-    git_wt_count=$(git -C "$project_dir" worktree list 2>/dev/null | wc -l | tr -d ' ')
+    _wt_count=$(git -C "$project_dir" worktree list 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${_wt_count:-0}" -gt 1 ] 2>/dev/null; then
+        _wt_root=$(git -C "$project_dir" rev-parse --show-toplevel 2>/dev/null)
+        _main_root=$(git -C "$project_dir" worktree list 2>/dev/null | head -1 | awk '{print $1}')
+        if [ "$_wt_root" != "$_main_root" ]; then
+            git_wt_name=$(basename "$_wt_root" 2>/dev/null)
+        else
+            git_wt_name="main"
+        fi
+        git_wt_count="$_wt_count"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -645,8 +656,8 @@ printf "${FG_LEFT}${CAP_RIGHT}${RESET}"
 chip2_content=""
 if [ -n "$git_branch" ]; then
     chip2_content="${ICON_GITHUB} ${ICON_BRANCH} ${git_branch}${git_dirty}"
-    if [ "${git_wt_count:-0}" -gt 1 ] 2>/dev/null; then
-        chip2_content="${chip2_content} ${ICON_WORKTREE} wt:${git_wt_count}"
+    if [ -n "$git_wt_name" ]; then
+        chip2_content="${chip2_content} ${ICON_WORKTREE} ${git_wt_name}(${git_wt_count})"
     fi
 fi
 
