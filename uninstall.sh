@@ -37,6 +37,29 @@ elif [ -f "$SETTINGS_FILE" ]; then
     echo "Please manually remove the 'statusLine' key from ${SETTINGS_FILE}"
 fi
 
+# ── Remove CC_CHIPS lines from shell RC ──────────────────────────
+RC_FILE=""
+if [ -n "$ZSH_VERSION" ] || [[ "$SHELL" == */zsh ]]; then
+    RC_FILE="${HOME}/.zshrc"
+elif [ -n "$BASH_VERSION" ] || [[ "$SHELL" == */bash ]]; then
+    RC_FILE="${HOME}/.bashrc"
+fi
+
+if [ -n "$RC_FILE" ] && [ -f "$RC_FILE" ]; then
+    if grep -q "CC_CHIPS_THEME\|CC_CHIPS_BILLING" "$RC_FILE" 2>/dev/null; then
+        sed -i.bak '/export CC_CHIPS_THEME=/d' "$RC_FILE" \
+            || sed -i '/export CC_CHIPS_THEME=/d' "$RC_FILE"
+        sed -i.bak '/export CC_CHIPS_BILLING=/d' "$RC_FILE" \
+            || sed -i '/export CC_CHIPS_BILLING=/d' "$RC_FILE"
+        rm -f "${RC_FILE}.bak"
+        echo "Removed CC_CHIPS_THEME and CC_CHIPS_BILLING from ${RC_FILE}"
+    fi
+fi
+
+# ── Remove skill directory ───────────────────────────────────────
+SKILL_DIR="${HOME}/.claude/skills/cc-chips"
+[ -d "$SKILL_DIR" ] && rm -rf "$SKILL_DIR" && echo "Removed skill directory ${SKILL_DIR}"
+
 # ── Offer backup restore ──────────────────────────────────────────
 latest_backup=$(ls -t "${HOME}/.claude/settings.json.bak."* 2>/dev/null | head -1)
 if [ -n "$latest_backup" ]; then
@@ -55,9 +78,18 @@ fi
 rm -rf "$INSTALL_DIR"
 _green "Removed ${INSTALL_DIR}"
 
-# ── Reminder ─────────────────────────────────────────────────────
+# ── Remove cache files ───────────────────────────────────────────
+for f in /tmp/claude/statusline-usage-cache.json \
+         /tmp/claude/statusline-usage-refresh.lock \
+         /tmp/claude/transcript-cache.json \
+         /tmp/claude/config-counts.json \
+         /tmp/claude/api-time-delta.json \
+         /tmp/claude/ccusage-monthly-cache.json; do
+    rm -f "$f" "${f}.tmp"
+done
+echo "Removed CC CHIPS cache files from /tmp/claude/"
+
+# ── Done ─────────────────────────────────────────────────────────
 echo ""
-_yellow "Note: If you added 'export CC_CHIPS_THEME=...' to ~/.bashrc or ~/.zshrc,"
-echo "      please remove that line manually."
-echo ""
-echo "CC CHIPS-JY has been uninstalled."
+_green "CC CHIPS-JY has been completely uninstalled."
+echo "Restart Claude Code to deactivate the status line."

@@ -112,24 +112,31 @@ fi
 
 # ── Write CC_CHIPS_THEME to shell RC ─────────────────────────────
 RC_FILE=""
-case "$SHELL" in
-    */zsh)  RC_FILE="${HOME}/.zshrc"  ;;
-    */bash) RC_FILE="${HOME}/.bashrc" ;;
-esac
+if [ -n "$ZSH_VERSION" ] || [[ "$SHELL" == */zsh ]]; then
+    RC_FILE="${HOME}/.zshrc"
+elif [ -n "$BASH_VERSION" ] || [[ "$SHELL" == */bash ]]; then
+    RC_FILE="${HOME}/.bashrc"
+fi
 
 if [ -n "$RC_FILE" ] && [ -f "$RC_FILE" ]; then
-    if ! grep -q "CC_CHIPS_THEME" "$RC_FILE" 2>/dev/null; then
+    if grep -q "CC_CHIPS_THEME" "$RC_FILE" 2>/dev/null; then
+        sed -i.bak "s/export CC_CHIPS_THEME=.*/export CC_CHIPS_THEME=${chosen_theme}/" "$RC_FILE" \
+            || sed -i "s/export CC_CHIPS_THEME=.*/export CC_CHIPS_THEME=${chosen_theme}/" "$RC_FILE"
+        rm -f "${RC_FILE}.bak"
+        echo "Updated CC_CHIPS_THEME=${chosen_theme} in ${RC_FILE}"
+    else
         echo "" >> "$RC_FILE"
         echo "export CC_CHIPS_THEME=${chosen_theme}" >> "$RC_FILE"
         echo "Added CC_CHIPS_THEME=${chosen_theme} to ${RC_FILE}"
-    else
-        _yellow "CC_CHIPS_THEME already set in ${RC_FILE} — not overwriting."
     fi
-    if ! grep -q "CC_CHIPS_BILLING" "$RC_FILE" 2>/dev/null; then
+    if grep -q "CC_CHIPS_BILLING" "$RC_FILE" 2>/dev/null; then
+        sed -i.bak "s/export CC_CHIPS_BILLING=.*/export CC_CHIPS_BILLING=${chosen_billing}/" "$RC_FILE" \
+            || sed -i "s/export CC_CHIPS_BILLING=.*/export CC_CHIPS_BILLING=${chosen_billing}/" "$RC_FILE"
+        rm -f "${RC_FILE}.bak"
+        echo "Updated CC_CHIPS_BILLING=${chosen_billing} in ${RC_FILE}"
+    else
         echo "export CC_CHIPS_BILLING=${chosen_billing}" >> "$RC_FILE"
         echo "Added CC_CHIPS_BILLING=${chosen_billing} to ${RC_FILE}"
-    else
-        _yellow "CC_CHIPS_BILLING already set in ${RC_FILE} — not overwriting."
     fi
 fi
 

@@ -89,6 +89,7 @@ if grep -q "CC_CHIPS_THEME" "$RC_FILE" 2>/dev/null; then
   # Update existing line (sed in-place, BSD and GNU compatible)
   sed -i.bak "s/export CC_CHIPS_THEME=.*/export CC_CHIPS_THEME=$THEME/" "$RC_FILE" \
     || sed -i "s/export CC_CHIPS_THEME=.*/export CC_CHIPS_THEME=$THEME/" "$RC_FILE"
+  rm -f "${RC_FILE}.bak"
 else
   echo "" >> "$RC_FILE"
   echo "export CC_CHIPS_THEME=$THEME" >> "$RC_FILE"
@@ -113,6 +114,7 @@ RC_FILE="<detected above>"
 if grep -q "CC_CHIPS_BILLING" "$RC_FILE" 2>/dev/null; then
   sed -i.bak "s/export CC_CHIPS_BILLING=.*/export CC_CHIPS_BILLING=$MODE/" "$RC_FILE" \
     || sed -i "s/export CC_CHIPS_BILLING=.*/export CC_CHIPS_BILLING=$MODE/" "$RC_FILE"
+  rm -f "${RC_FILE}.bak"
 else
   echo "" >> "$RC_FILE"
   echo "export CC_CHIPS_BILLING=$MODE" >> "$RC_FILE"
