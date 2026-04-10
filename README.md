@@ -89,7 +89,7 @@ OAuth API 호출 없이 Current/Weekly 사용량을 즉시 렌더링합니다.
 - `jq` — JSON 파싱
 - `git` — 브랜치 감지 + 설치 스크립트
 - `curl` — Usage API 호출 (Row 2)
-- [Nerd Font](https://www.nerdfonts.com/) — `claude`, `cool`, `retro`, `cyber` 테마에 필요 (JetBrains Mono Nerd Font 권장)
+- [Nerd Font](https://www.nerdfonts.com/) — `claude`, `cool`, `retro`, `cyber` 테마에 필요 (JetBrainsMono Nerd Font 권장)
   - `minimal` 테마는 Nerd Font 없이도 동작
 
 ### 자동 설치 (권장)
@@ -131,6 +131,14 @@ git clone https://github.com/JaeyeonBang/cc-chips-jy.git ~/.claude/cc-chips
 ```
 
 3. Claude Code 재시작
+
+### 설치 후 VSCode 세팅(or Cursor, Antigravity..)
+
+- [Nerd Font](https://www.nerdfonts.com/) — Nerd 폰트 설치 (JetBrainsMono Nerd Font 권장)
+- 좌측 상단의 File -> Preferences -> Settings
+- terminal: Font 입력
+- Terminal > Intergrated: Font Family에 폰트 이름 입력 ("JetBrainsMono Nerd Font")
+- VScode 재시작
 
 ### 제거
 
