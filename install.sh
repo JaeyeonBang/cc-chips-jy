@@ -46,7 +46,18 @@ if ! command -v jq >/dev/null 2>&1; then
     case "$PLATFORM" in
         macos)   echo "  Install: brew install jq" ;;
         linux)   echo "  Install: sudo apt install jq" ;;
-        gitbash) echo "  Install: winget install jqlang.jq  (run in PowerShell/cmd)" ;;
+        gitbash)
+            if command -v winget >/dev/null 2>&1; then
+                echo "  Install: winget install jqlang.jq  (run in PowerShell/cmd)"
+            else
+                echo "  Install (PowerShell, run as Admin — or in any PowerShell if ~/bin is in PATH):"
+                echo '    $jqDir = "$env:USERPROFILE\bin"'
+                echo '    New-Item -ItemType Directory -Force -Path $jqDir | Out-Null'
+                echo '    Invoke-WebRequest -Uri "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe" -OutFile "$jqDir\jq.exe" -UseBasicParsing'
+                echo '    $p = [Environment]::GetEnvironmentVariable("PATH","User"); [Environment]::SetEnvironmentVariable("PATH","$p;$jqDir","User")'
+                echo "  Then restart your terminal."
+            fi
+            ;;
     esac
     missing_deps=1
 fi
