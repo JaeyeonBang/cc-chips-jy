@@ -17,7 +17,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -z "$CC_CHIPS_THEME" ]; then
     _rc="$HOME/.bashrc"
     [ -f "$HOME/.zshrc" ] && [ "${SHELL##*/}" = "zsh" ] && _rc="$HOME/.zshrc"
-    _theme_from_rc=$(grep -oP '(?<=CC_CHIPS_THEME=)[^\s"]+' "$_rc" 2>/dev/null)
+    # Portable extraction: BSD grep (macOS) has no -P/PCRE, so use sed instead.
+    _theme_from_rc=$(sed -n 's/.*CC_CHIPS_THEME=["'"'"']\{0,1\}\([^ "'"'"']*\).*/\1/p' "$_rc" 2>/dev/null | tail -1)
     [ -n "$_theme_from_rc" ] && CC_CHIPS_THEME="$_theme_from_rc"
 fi
 THEME="${CC_CHIPS_THEME:-claude}"
@@ -547,6 +548,7 @@ cache_pct=0
 # Last API response time (delta between renders, not cumulative total)
 # cost.total_api_duration_ms is cumulative — we track the delta to get per-call time.
 API_TIME_CACHE="/tmp/claude/api-time-delta.json"
+mkdir -p /tmp/claude 2>/dev/null   # ensure cache dir exists before first write (fresh boot)
 _prev_api_ms=0; api_sec="--"
 if [ -f "$API_TIME_CACHE" ]; then
     _prev_api_ms=$(jq -r '.api_ms // 0' "$API_TIME_CACHE" 2>/dev/null)

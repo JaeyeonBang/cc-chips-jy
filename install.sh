@@ -129,7 +129,10 @@ elif [ -n "$BASH_VERSION" ] || [[ "$SHELL" == */bash ]]; then
     RC_FILE="${HOME}/.bashrc"
 fi
 
-if [ -n "$RC_FILE" ] && [ -f "$RC_FILE" ]; then
+if [ -n "$RC_FILE" ]; then
+    # Create the RC file if it doesn't exist yet, so theme/billing choices persist
+    # (fresh macOS/Linux setups may not have a ~/.zshrc or ~/.bashrc).
+    [ -f "$RC_FILE" ] || touch "$RC_FILE"
     if grep -q "CC_CHIPS_THEME" "$RC_FILE" 2>/dev/null; then
         sed -i.bak "s/export CC_CHIPS_THEME=.*/export CC_CHIPS_THEME=${chosen_theme}/" "$RC_FILE" \
             || sed -i "s/export CC_CHIPS_THEME=.*/export CC_CHIPS_THEME=${chosen_theme}/" "$RC_FILE"
